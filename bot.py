@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 API_KEY = os.environ.get("LTA_API_KEY")
 
 # ⚠️ IMPORTANT: If you changed the sliders on your Dashboard, update these numbers!
-SHIFT = 0.05
-TILT = 0.25
+SHIFT = 0.28
+TILT = 0.43
 
 def count_cars():
     # 1. Fetch Image
