@@ -117,8 +117,8 @@ st.set_page_config(layout="wide", page_title="JamSniper Pro")
 st.title("🚦 JamSniper: Live Dashboard")
 
 st.sidebar.header("Calibration")
-shift_val = st.sidebar.slider("↔️ Position", -0.5, 0.5, 0.05, 0.01)
-tilt_val = st.sidebar.slider("🔄 Tilt", -0.5, 0.5, 0.25, 0.01)
+shift_val = st.sidebar.slider("↔️ Position", -0.5, 0.5, 0.28, 0.01) # New default: 0.28
+tilt_val = st.sidebar.slider("🔄 Tilt", -0.5, 0.5, 0.43, 0.01)     # New default: 0.43
 st.sidebar.divider()
 
 if st.sidebar.button("📸 Refresh Feed", type="primary"):
