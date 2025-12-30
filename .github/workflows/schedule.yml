@@ -1,0 +1,38 @@
+name: 🚦 JamSniper Bot
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Run every 30 mins
+  workflow_dispatch:        # Allow manual button click
+
+jobs:
+  update-traffic:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # Allow robot to save the file
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install Libraries
+      run: |
+        pip install requests pillow ultralytics opencv-python-headless
+
+    - name: Run Traffic Bot
+      env:
+        LTA_API_KEY: ${{ secrets.LTA_API_KEY }}
+      run: python bot.py
+
+    - name: Save Data
+      run: |
+        git config --global user.name 'JamSniper Bot'
+        git config --global user.email 'bot@noreply.github.com'
+        git add data.csv
+        git commit -m "🚦 Auto-update traffic data" || exit 0
+        git push
