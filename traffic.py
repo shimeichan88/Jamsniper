@@ -60,7 +60,7 @@ try:
     df = pd.read_csv("data.csv")
     
     if not df.empty:
-        # Convert Time Column to DateTime for the Chart
+        # Convert Time Column to DateTime 
         df['Time'] = pd.to_datetime(df['Time'])
         latest = df.iloc[-1]
         
@@ -83,13 +83,19 @@ try:
             elif latest["To_Woodlands"] < 45: st.warning("⚠️ MODERATE")
             else: st.error("🛑 JAM")
             
-        # --- CHART ---
+        # --- CHART (FIXED X-AXIS) ---
         st.write("---")
         st.subheader("📈 24-Hour Trend")
         
-        # Set Time as Index so X-axis shows time nicely
-        chart_data = df.tail(48).set_index("Time")
-        st.line_chart(chart_data[["To_Johor", "To_Woodlands"]])
+        # 1. Take the last 48 records (approx 24 hours)
+        chart_data = df.tail(48).copy()
+        
+        # 2. Create a "Pretty Time" column (Format: Hour:Minute)
+        # This fixes the messy X-axis by showing "18:30" instead of dates
+        chart_data["Display_Time"] = chart_data["Time"].dt.strftime("%H:%M")
+        
+        # 3. Plot using the clean time labels
+        st.line_chart(chart_data.set_index("Display_Time")[["To_Johor", "To_Woodlands"]])
 
     else:
         st.warning("Data file is empty. Wait for the bot to run.")
