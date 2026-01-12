@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import requests
+import os
 
-# 1. CONFIGURATION
-st.set_page_config(page_title="JamSniper Dashboard", layout="centered")
+# 1. PAGE CONFIGURATION
+st.set_page_config(page_title="JamSniper", layout="centered")
 st.title("🚦 JamSniper: Causeway Traffic")
 
-# 2. WEATHER FUNCTION
+# 2. WEATHER FUNCTION (The "Sensor")
 def get_weather():
     try:
         # Fetch real-time rain data from Singapore NEA
@@ -33,59 +34,61 @@ def get_weather():
         else: return "⛈️ Heavy Rain", "Visibility is poor!"
         
     except Exception:
-        return "⚠️ Error", "Could not load weather."
+        return "⚠️ Unavailable", "Could not load weather."
 
-# 3. DISPLAY WEATHER
+# 3. DISPLAY WEATHER CARD
 weather_status, weather_desc = get_weather()
 st.info(f"**Weather at Causeway:** {weather_status}\n\n_{weather_desc}_")
 
-# 4. LOAD DATA
+# 4. SHOW THE LIVE IMAGE 📸
+st.write("---")
+if os.path.exists("latest_traffic.jpg"):
+    st.image("latest_traffic.jpg", caption="Live View from Robot Eyes", use_column_width=True)
+else:
+    st.info("Waiting for the first image update... (Run the bot!)")
+
+# 5. LOAD & DISPLAY TRAFFIC DATA
 try:
     df = pd.read_csv("data.csv")
     
-    # Check if we have data
     if not df.empty:
+        # Convert Time Column to DateTime for the Chart
+        df['Time'] = pd.to_datetime(df['Time'])
         latest = df.iloc[-1]
-        timestamp = latest["Time"]
         
-        # Handle older CSVs that might not have split columns yet
-        johor = latest.get("To_Johor", 0)
-        woodlands = latest.get("To_Woodlands", 0)
-        
-        st.write(f"**Last Update:** {timestamp}")
+        st.write(f"**Last Update:** {latest['Time']}")
 
-        # 5. METRICS (SPLIT)
+        # --- SCORECARDS ---
         col1, col2 = st.columns(2)
         
-        # -- TO JOHOR --
+        # Card 1: To Johor
         with col1:
-            st.metric("To Johor", int(johor))
-            if johor < 25: st.success("✅ CLEAR")
-            elif johor < 45: st.warning("⚠️ MODERATE")
+            st.metric("To Johor", int(latest["To_Johor"]))
+            if latest["To_Johor"] < 25: st.success("✅ CLEAR")
+            elif latest["To_Johor"] < 45: st.warning("⚠️ MODERATE")
             else: st.error("🛑 JAM")
             
-        # -- TO WOODLANDS --
+        # Card 2: To Woodlands
         with col2:
-            st.metric("To Woodlands", int(woodlands))
-            if woodlands < 25: st.success("✅ CLEAR")
-            elif woodlands < 45: st.warning("⚠️ MODERATE")
+            st.metric("To Woodlands", int(latest["To_Woodlands"]))
+            if latest["To_Woodlands"] < 25: st.success("✅ CLEAR")
+            elif latest["To_Woodlands"] < 45: st.warning("⚠️ MODERATE")
             else: st.error("🛑 JAM")
             
-        # 6. CHART (Reverted to Line Chart)
+        # --- CHART ---
         st.write("---")
         st.subheader("📈 24-Hour Trend")
         
-        # Ensure we interpret 'Time' correctly for the chart
-        # We assume the last 48 entries = ~24 hours
-        chart_data = df.tail(48).copy()
+        # Set Time as Index so X-axis shows time nicely
+        chart_data = df.tail(48).set_index("Time")
         st.line_chart(chart_data[["To_Johor", "To_Woodlands"]])
 
     else:
         st.warning("Data file is empty. Wait for the bot to run.")
 
 except FileNotFoundError:
-    st.error("No data.csv found yet. Please run the bot in GitHub Actions.")
+    st.error("No data found! Please check if your 'JamSniper Bot' is running in GitHub Actions.")
 
-# 7. REFRESH BUTTON
+# 6. REFRESH BUTTON
 if st.button("Refresh Data"):
     st.rerun()
