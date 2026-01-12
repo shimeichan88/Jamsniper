@@ -27,6 +27,8 @@ jobs:
     - name: Run Traffic Bot
       env:
         LTA_API_KEY: ${{ secrets.LTA_API_KEY }}
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}    
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python bot.py
 
     - name: Save Data
