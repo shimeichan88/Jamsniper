@@ -16,6 +16,7 @@ else:
     st.stop()
 
 CSV_URL = "https://github.com/shimeichan88/Jamsniper/raw/refs/heads/main/data.csv"
+WEATHER_URL = "https://api.data.gov.sg/v1/environment/rainfall"
 
 # Load Model
 model = YOLO('yolov8m.pt') 
@@ -37,12 +38,37 @@ def load_history():
     except Exception:
         return pd.DataFrame()
 
+# --- WEATHER CHECKER (NEW) ---
+def get_weather():
+    try:
+        # 1. Ask NEA for data
+        resp = requests.get(WEATHER_URL).json()
+        
+        # 2. Look for Station S105 (Admiralty Road West)
+        # Note: We loop because the order of stations changes randomly
+        rain_value = 0
+        for reading in resp['items'][0]['readings']:
+            if reading['station_id'] == 'S105':
+                rain_value = reading['value']
+                break
+        
+        # 3. Translate Number to Text
+        if rain_value == 0:
+            return "☀️ Clear", "Normal"
+        elif rain_value < 5:
+            return "🌧️ Light Rain", "Caution"
+        else:
+            return "⛈️ Heavy Rain", "Danger"
+            
+    except Exception:
+        return "☁️ Unknown", "Normal"
+
 # --- AI ANALYZER (HD MODE) ---
 def fetch_and_analyze():
     url = "https://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
     headers = {"AccountKey": API_KEY, "accept": "application/json"}
     try:
-        # 1. Get Image Link
+        # Get Traffic Image
         response = requests.get(url, headers=headers)
         target_link = None
         if response.status_code == 200:
@@ -52,25 +78,30 @@ def fetch_and_analyze():
                     break
         if not target_link: return None
         
-        # 2. Download Image
         img_resp = requests.get(target_link)
         img = Image.open(BytesIO(img_resp.content))
         
-        # 3. RUN AI (High Sensitivity + HD)
+        # Get Weather Data
+        weather_text, weather_status = get_weather()
+        
         results = model(img, imgsz=1280, conf=0.05, iou=0.7, classes=[2, 3, 5, 7])
-        return {"image": img, "results": results[0]}
+        return {
+            "image": img, 
+            "results": results[0], 
+            "weather": weather_text,
+            "weather_status": weather_status
+        }
     except Exception as e:
         st.error(f"Error: {e}")
         return None
 
-# --- VISUALIZER (NO FILTER) ---
+# --- VISUALIZER ---
 def draw_interface(data, shift, tilt):
     img = data['image'].copy() 
     results = data['results']
     width, height = img.size
     draw = ImageDraw.Draw(img)
     
-    # Calibration Logic
     base_top = width * 0.60
     base_bottom = width * 0.40
     top_x = base_top + (width * shift) + (width * tilt)
@@ -86,17 +117,15 @@ def draw_interface(data, shift, tilt):
         center_x = (x1 + x2) / 2
         center_y = (y1 + y2) / 2
         
-        # Billboard Filter (Top Left Corner Only)
         if center_y > (height * 0.60) and center_x < (width * 0.30): continue 
 
-        # Count Logic
         divider_x = top_x + (slope * center_y)
         if center_x < divider_x:
             to_johor += 1
-            color = "#00ff00" # Green
+            color = "#00ff00"
         else:
             to_woodlands += 1
-            color = "#ff0000" # Red
+            color = "#ff0000"
             
         draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
             
@@ -104,7 +133,13 @@ def draw_interface(data, shift, tilt):
 
 # --- LAYOUT ---
 st.set_page_config(layout="wide", page_title="JamSniper Pro")
-st.title("🚦 JamSniper: Live Dashboard")
+
+# NEW: Header with Weather
+if st.session_state['traffic_data']:
+    weather = st.session_state['traffic_data']['weather']
+    st.title(f"🚦 JamSniper: {weather}")
+else:
+    st.title("🚦 JamSniper: Live Dashboard")
 
 st.sidebar.header("Calibration")
 shift_val = st.sidebar.slider("↔️ Position", -0.5, 0.5, 0.28, 0.01)
@@ -112,7 +147,7 @@ tilt_val = st.sidebar.slider("🔄 Tilt", -0.5, 0.5, 0.43, 0.01)
 st.sidebar.divider()
 
 if st.sidebar.button("📸 Refresh Feed", type="primary"):
-    with st.spinner("Analyzing..."):
+    with st.spinner("Analyzing Traffic & Weather..."):
         data = fetch_and_analyze()
         if data:
             st.session_state['traffic_data'] = data
@@ -125,7 +160,7 @@ if st.session_state['traffic_data']:
     col1, col2 = st.columns([0.75, 0.25])
     
     with col1:
-        st.image(processed_img, use_column_width=True, caption="Live Analysis")
+        st.image(processed_img, use_column_width=True, caption=f"Live Analysis • {st.session_state['traffic_data']['weather']}")
         
         st.markdown("### 📈 24-Hour Trend")
         history_df = load_history()
@@ -137,10 +172,8 @@ if st.session_state['traffic_data']:
     with col2:
         st.markdown("### 📊 Status")
         
-        # --- NEW THRESHOLDS (UPDATED REQUEST) ---
-        # 0 - 24  = CLEAR
-        # 25 - 45 = MODERATE
-        # > 45    = JAM
+        # WEATHER CARD
+        st.info(f"**Weather at Causeway:**\n\n{st.session_state['traffic_data']['weather']}")
         
         st.markdown("---")
         st.write("**To Johor**")
