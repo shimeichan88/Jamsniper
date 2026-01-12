@@ -165,7 +165,8 @@ if st.session_state['traffic_data']:
         st.markdown("### 📈 24-Hour Trend")
         history_df = load_history()
         if not history_df.empty:
-            st.line_chart(history_df[['To_Johor', 'To_Woodlands']])
+            # Creates a "Timeline" style chart (Time on Y-axis, Bars go Right)
+            st.bar_chart(history_df[['To_Johor', 'To_Woodlands']], horizontal=True)
         else:
             st.info("Waiting for Robot data...")
 
