@@ -7,28 +7,36 @@ import os
 st.set_page_config(page_title="JamSniper", layout="centered")
 st.title("🚦 JamSniper: Causeway Traffic")
 
-# 2. WEATHER FUNCTION (The "Sensor")
+# 2. WEATHER FUNCTION (Smart Version with Backup)
 def get_weather():
     try:
         # Fetch real-time rain data from Singapore NEA
         url = "https://api.data.gov.sg/v1/environment/rainfall"
         data = requests.get(url).json()
         
-        # Station S105 is "Admiralty Road West" (Closest to Causeway)
         stations = data['metadata']['stations']
         readings = data['items'][0]['readings']
+        
+        # Priority List: 
+        # 1. S105 = Admiralty Road West (Closest to Causeway)
+        # 2. S104 = Woodlands Avenue 9 (Backup nearby)
+        target_ids = ['S105', 'S104']
         
         rain_value = 0
         found = False
         
-        for i, station in enumerate(stations):
-            if station['id'] == 'S105':
-                rain_value = readings[i]['value']
-                found = True
-                break
+        # Loop through our priority list
+        for target_id in target_ids:
+            for i, station in enumerate(stations):
+                if station['id'] == target_id:
+                    rain_value = readings[i]['value']
+                    found = True
+                    break
+            if found: break  # Stop looking if we found a working sensor
         
         # Logic: 0 = Clear, <5 = Light Rain, >5 = Heavy Rain
-        if not found: return "☁️ Unknown", "Sensor offline"
+        if not found: return "☁️ Unknown", "All nearby sensors offline"
+        
         if rain_value == 0: return "☀️ Clear", "No rain detected."
         elif rain_value < 5: return "🌧️ Light Rain", "Roads might be wet."
         else: return "⛈️ Heavy Rain", "Visibility is poor!"
