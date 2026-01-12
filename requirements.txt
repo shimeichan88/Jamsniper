@@ -1,5 +1,7 @@
 streamlit
-ultralytics
+pandas
 requests
 Pillow
+ultralytics
+pytz
 opencv-python-headless

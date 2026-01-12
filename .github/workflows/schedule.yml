@@ -22,7 +22,8 @@ jobs:
 
     - name: Install Libraries
       run: |
-        pip install requests pillow ultralytics opencv-python-headless
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
     - name: Run Traffic Bot
       env:
