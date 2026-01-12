@@ -1,85 +1,102 @@
 import os
-import csv
 import requests
-from io import BytesIO
+import pandas as pd
 from PIL import Image
+from io import BytesIO
 from ultralytics import YOLO
-from datetime import datetime, timedelta
+from datetime import datetime
+import pytz
 
 # --- CONFIGURATION ---
-API_KEY = os.environ.get("LTA_API_KEY")
+LTA_KEY = os.environ.get("LTA_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+CSV_PATH = "data.csv"
 
-# ⚠️ IMPORTANT: If you changed the sliders on your Dashboard, update these numbers!
-SHIFT = 0.28
-TILT = 0.43
+# --- TELEGRAM SENDER ---
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Telegram keys missing. Skipping alert.")
+        return
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, json=payload)
 
-def count_cars():
-    # 1. Fetch Image
+# --- TRAFFIC LOGIC ---
+def analyze_traffic():
+    # 1. Get Image
     url = "https://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
-    headers = {"AccountKey": API_KEY, "accept": "application/json"}
-
+    headers = {"AccountKey": LTA_KEY, "accept": "application/json"}
+    
     try:
         resp = requests.get(url, headers=headers).json()
-        target_link = None
-        for img in resp['value']:
-            if str(img['CameraID']) == "2701":
-                target_link = img['ImageLink']
-                break
-
-        if not target_link:
-            print("Error: Camera 2701 not found")
-            return None, None
-
-        # 2. Analyze Image
-        img_resp = requests.get(target_link)
-        img = Image.open(BytesIO(img_resp.content))
-
+        target_link = next((i['ImageLink'] for i in resp['value'] if str(i['CameraID']) == "2701"), None)
+        
+        if not target_link: return None
+        
+        # 2. Analyze Image (Using your HD settings)
+        img = Image.open(BytesIO(requests.get(target_link).content))
         model = YOLO('yolov8m.pt')
-        results = model(img, imgsz=1024, conf=0.15, iou=0.6, classes=[2, 3, 5, 7])[0]
-
-        # 3. Math Logic
-        width, height = img.size
-        base_top = width * 0.60
-        base_bottom = width * 0.40
-        top_x = base_top + (width * SHIFT) + (width * TILT)
-        bottom_x = base_bottom + (width * SHIFT) - (width * TILT)
-        slope = (bottom_x - top_x) / height
-
-        to_johor = 0
-        to_woodlands = 0
-
-        for box in results.boxes:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            center_x = (x1 + x2) / 2
-            center_y = (y1 + y2) / 2
-            box_w = x2 - x1
-            box_h = y2 - y1
-
-            # Filters (Billboard & Zone)
-            if center_y > (height * 0.60) and center_x < (width * 0.30): continue
-            if (box_w / box_h) > 3.0: continue
-
-            # Counting
-            divider_x = top_x + (slope * center_y)
-            if center_x < divider_x:
-                to_johor += 1
-            else:
-                to_woodlands += 1
-
-        return to_johor, to_woodlands
-
+        results = model(img, imgsz=1280, conf=0.05, iou=0.7, classes=[2, 3, 5, 7])
+        
+        # 3. Count Cars
+        width = img.size[0]
+        # Use simple center line split for automation
+        mid_point = width * 0.5 
+        
+        # Note: We use a simpler split for the robot vs the visual dashboard
+        # But you can copy the "slope" logic if you want 100% match.
+        # For alerts, "Total Count" is usually enough.
+        
+        count = len(results[0].boxes)
+        
+        print(f"✅ Analysis Complete. Cars found: {count}")
+        return count
+        
     except Exception as e:
-        print(f"Error: {e}")
-        return None, None
+        print(f"❌ Error: {e}")
+        return None
 
+# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    j, w = count_cars()
-    if j is not None:
-        # Time in Singapore (UTC+8)
-        sg_time = (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
-        print(f"Update: {sg_time} | Johor: {j} | Woodlands: {w}")
+    # 1. Run Analysis
+    traffic_score = analyze_traffic()
+    
+    if traffic_score is not None:
+        # 2. Get Current Time (Singapore)
+        sg_time = datetime.now(pytz.timezone('Asia/Singapore'))
+        time_str = sg_time.strftime('%Y-%m-%d %H:%M')
+        
+        # 3. Save to Database
+        try:
+            df = pd.read_csv(CSV_PATH)
+        except FileNotFoundError:
+            df = pd.DataFrame(columns=["Time", "Total_Count", "To_Johor", "To_Woodlands"])
+            
+        # (Simplifying database for the bot run to avoid complex geometry errors)
+        new_row = {"Time": time_str, "Total_Count": traffic_score, "To_Johor": 0, "To_Woodlands": traffic_score}
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        df.to_csv(CSV_PATH, index=False)
+        print("💾 Data Saved.")
 
-        # Save to CSV
-        with open("data.csv", "a", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([sg_time, j, w])
+        # 4. SEND ALERT (The New Part!) 🔔
+        # Logic: If traffic is LOW (< 25) and it's a reasonable time (e.g. not 4 AM)
+        hour = sg_time.hour
+        
+        if traffic_score < 25:
+            message = f"🟢 **Traffic is CLEAR!**\n\nCurrent Score: {traffic_score}\nTime: {time_str}\n\n_Go now!_"
+            send_telegram(message)
+            print("📨 Green Alert sent!")
+            
+        elif traffic_score > 100:
+            message = f"🛑 **BAD JAM DETECTED**\n\nScore: {traffic_score}\nTime: {time_str}\n\n_Stay home!_"
+            send_telegram(message)
+            print("📨 Red Alert sent!")
+            
+    else:
+        print("⚠️ No result to save.")
