@@ -37,7 +37,7 @@ def load_history():
     except Exception:
         return pd.DataFrame()
 
-# --- AI ANALYZER (UPGRADED: HD MODE) ---
+# --- AI ANALYZER (HD MODE) ---
 def fetch_and_analyze():
     url = "https://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
     headers = {"AccountKey": API_KEY, "accept": "application/json"}
@@ -56,17 +56,14 @@ def fetch_and_analyze():
         img_resp = requests.get(target_link)
         img = Image.open(BytesIO(img_resp.content))
         
-        # 3. RUN AI (High Sensitivity Settings)
-        # imgsz=1280: "HD Mode" to see small bikes
-        # conf=0.05:  "Trust everything" (catches faint cars)
-        # iou=0.7:    "Allow crowds" (counts overlapping cars)
+        # 3. RUN AI (High Sensitivity + HD)
         results = model(img, imgsz=1280, conf=0.05, iou=0.7, classes=[2, 3, 5, 7])
         return {"image": img, "results": results[0]}
     except Exception as e:
         st.error(f"Error: {e}")
         return None
 
-# --- VISUALIZER (UPDATED: NO FILTER) ---
+# --- VISUALIZER (NO FILTER) ---
 def draw_interface(data, shift, tilt):
     img = data['image'].copy() 
     results = data['results']
@@ -88,8 +85,6 @@ def draw_interface(data, shift, tilt):
         x1, y1, x2, y2 = box.xyxy[0].tolist()
         center_x = (x1 + x2) / 2
         center_y = (y1 + y2) / 2
-        # box_w = x2 - x1 (Not used since we removed the filter)
-        # box_h = y2 - y1 (Not used since we removed the filter)
         
         # Billboard Filter (Top Left Corner Only)
         if center_y > (height * 0.60) and center_x < (width * 0.30): continue 
@@ -112,7 +107,6 @@ st.set_page_config(layout="wide", page_title="JamSniper Pro")
 st.title("🚦 JamSniper: Live Dashboard")
 
 st.sidebar.header("Calibration")
-# DEFAULT VALUES UPDATED TO 0.28 AND 0.43
 shift_val = st.sidebar.slider("↔️ Position", -0.5, 0.5, 0.28, 0.01)
 tilt_val = st.sidebar.slider("🔄 Tilt", -0.5, 0.5, 0.43, 0.01)
 st.sidebar.divider()
@@ -143,19 +137,23 @@ if st.session_state['traffic_data']:
     with col2:
         st.markdown("### 📊 Status")
         
-        # New Thresholds for Sensitivity
+        # --- NEW THRESHOLDS (UPDATED REQUEST) ---
+        # 0 - 24  = CLEAR
+        # 25 - 45 = MODERATE
+        # > 45    = JAM
+        
         st.markdown("---")
         st.write("**To Johor**")
         st.metric("Score", f"{count_johor}")
-        if count_johor < 10: st.success("✅ CLEAR")
-        elif count_johor < 20: st.warning("⚠️ MODERATE")
+        if count_johor < 25: st.success("✅ CLEAR")
+        elif count_johor <= 45: st.warning("⚠️ MODERATE")
         else: st.error("🛑 JAM")
             
         st.markdown("---")
         st.write("**To Woodlands**")
         st.metric("Score", f"{count_woodlands}")
-        if count_woodlands < 10: st.success("✅ CLEAR")
-        elif count_woodlands < 20: st.warning("⚠️ MODERATE")
+        if count_woodlands < 25: st.success("✅ CLEAR")
+        elif count_woodlands <= 45: st.warning("⚠️ MODERATE")
         else: st.error("🛑 JAM")
 
 else:
