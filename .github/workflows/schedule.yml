@@ -36,6 +36,6 @@ jobs:
       run: |
         git config --global user.name 'JamSniper Bot'
         git config --global user.email 'bot@noreply.github.com'
-        git add data.csv
+        git add data.csv latest_traffic.jpg
         git commit -m "🚦 Auto-update traffic data" || exit 0
         git push
