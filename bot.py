@@ -93,7 +93,7 @@ if __name__ == "__main__":
             send_telegram(message)
             print("📨 Green Alert sent!")
             
-        elif traffic_score > 100:
+        elif traffic_score > 30:
             message = f"🛑 **BAD JAM DETECTED**\n\nScore: {traffic_score}\nTime: {time_str}\n\n_Stay home!_"
             send_telegram(message)
             print("📨 Red Alert sent!")
