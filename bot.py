@@ -6,17 +6,16 @@ from io import BytesIO
 from ultralytics import YOLO
 from datetime import datetime
 import pytz
-import cv2
 
 # --- CONFIGURATION ---
 LTA_KEY = os.environ.get("LTA_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 CSV_PATH = "data.csv"
-IMG_PATH = "latest_traffic.jpg"  # <--- WE WILL SAVE THE IMAGE NOW
+IMG_PATH = "latest_traffic.jpg"
 
-# YOUR GEOMETRY (ADJUST THESE IF JOHOR IS ALWAYS 0)
-SHIFT = 0.28   # If Johor is 0, try increasing this to 0.35
+# GEOMETRY
+SHIFT = 0.28   # Adjust this if needed (Increase to move line right)
 TILT = 0.43
 
 def send_telegram(message):
@@ -35,7 +34,7 @@ def analyze_traffic():
         target_link = next((i['ImageLink'] for i in resp['value'] if str(i['CameraID']) == "2701"), None)
         if not target_link: return None, None
         
-        # 2. Save Image for Website
+        # 2. Save Image
         img_data = requests.get(target_link).content
         with open(IMG_PATH, "wb") as f:
             f.write(img_data)
@@ -89,16 +88,17 @@ if __name__ == "__main__":
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(CSV_PATH, index=False)
         
-        # SEND SPLIT ALERTS 🔔
+        # --- NEW NOTIFICATION LOGIC ---
+        # Only send message if traffic > 50
         msg = ""
-        # Alert for Johor
-        if cj < 25: msg += f"🟢 **Johor is CLEAR ({cj})**\n"
-        elif cj > 45: msg += f"🛑 **JAM to Johor ({cj})**\n"
         
-        # Alert for Woodlands
-        if cw < 25: msg += f"🟢 **Woodlands is CLEAR ({cw})**\n"
-        elif cw > 45: msg += f"🛑 **JAM to Woodlands ({cw})**\n"
+        if cj > 50: 
+            msg += f"🛑 **JAM to Johor: {cj} cars**\n"
         
+        if cw > 50: 
+            msg += f"🛑 **JAM to Woodlands: {cw} cars**\n"
+            
+        # Send only if 'msg' is not empty
         if msg:
-            full_msg = f"🚦 **Traffic Update** ({time_str})\n\n{msg}\n_Drive safe!_"
+            full_msg = f"🚦 **Traffic Alert** ({time_str})\n\n{msg}\n_Avoid the Causeway!_"
             send_telegram(full_msg)
