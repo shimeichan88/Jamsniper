@@ -29,11 +29,10 @@ def get_weather():
         data = requests.get(url).json()
         stations = data['metadata']['stations']
         readings = data['items'][0]['readings']
-        
         target_ids = ['S105', 'S104']
+        
         rain_value = 0
         found = False
-        
         for target_id in target_ids:
             for i, station in enumerate(stations):
                 if station['id'] == target_id:
@@ -73,8 +72,8 @@ def analyze_traffic():
         bottom_x = base_bottom + (width * SHIFT) - (width * TILT)
         slope = (bottom_x - top_x) / height
         
-        j_count = 0
-        w_count = 0
+        j_area_total = 0
+        w_area_total = 0
         
         for box in results[0].boxes:
             x1, y1, x2, y2 = box.xyxy[0].tolist()
@@ -82,15 +81,25 @@ def analyze_traffic():
             
             if cy > (height * 0.60) and cx < (width * 0.30): continue 
             
+            # --- NEW UPGRADE: CALCULATE AREA INSTEAD OF COUNTING ---
+            box_area = (x2 - x1) * (y2 - y1)
+            
             divider_x = top_x + (slope * cy)
-            if cx < divider_x: j_count += 1
-            else: w_count += 1
+            if cx < divider_x: j_area_total += box_area
+            else: w_area_total += box_area
                 
-        return j_count, w_count
+        # Divide by 1000 to keep the index numbers small and readable
+        return int(j_area_total / 1000), int(w_area_total / 1000)
         
     except Exception as e:
         print(f"Error: {e}")
         return None, None
+
+def get_traffic_status(index):
+    """Helper function to determine the current traffic state."""
+    if index < 40: return "CLEAR"
+    elif index < 80: return "MODERATE"
+    else: return "JAM"
 
 if __name__ == "__main__":
     cj, cw = analyze_traffic()
@@ -99,7 +108,6 @@ if __name__ == "__main__":
         sg_time = datetime.now(pytz.timezone('Asia/Singapore'))
         time_str = sg_time.strftime('%Y-%m-%d %H:%M')
         
-        # 1. READ MEMORY (Check 30 mins ago)
         try: 
             df = pd.read_csv(CSV_PATH)
             if not df.empty:
@@ -110,32 +118,40 @@ if __name__ == "__main__":
         except: 
             df = pd.DataFrame(columns=["Time", "Total_Count", "To_Johor", "To_Woodlands"])
             prev_cj, prev_cw = 0, 0
-        
-        # 2. SAVE NEW DATA
+            
         new_row = {"Time": time_str, "Total_Count": cj+cw, "To_Johor": cj, "To_Woodlands": cw}
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(CSV_PATH, index=False)
         
-        # 3. SMART NOTIFICATION LOGIC
+        # --- NEW UPGRADE: STATE MACHINE LOGIC ---
         msg = ""
         
-        # To Johor Logic
-        if cj > 50 and prev_cj <= 50: 
-            msg += f"🛑 **NEW JAM to Johor** (Congestion Index: {cj})\n"
-        elif cj > 50 and cj >= (prev_cj + 15):
-            msg += f"📈 **JAM WORSENING to Johor** (Congestion Index: {cj})\n"
-        elif cj <= 20 and prev_cj > 20:
-            msg += f"✅ **JAM CLEARED to Johor** (Congestion Index: {cj})\n"
+        # Get Previous and Current States
+        prev_johor_status = get_traffic_status(prev_cj)
+        curr_johor_status = get_traffic_status(cj)
+        
+        prev_wood_status = get_traffic_status(prev_cw)
+        curr_wood_status = get_traffic_status(cw)
+        
+        # To Johor Alert Logic (Only alert if the STATUS changes)
+        if curr_johor_status != prev_johor_status:
+            if curr_johor_status == "JAM":
+                msg += f"🛑 **JAM to Johor** (Density Index: {cj})\n"
+            elif curr_johor_status == "MODERATE":
+                msg += f"⚠️ **Moderate Traffic to Johor** (Density Index: {cj})\n"
+            elif curr_johor_status == "CLEAR":
+                msg += f"✅ **Cleared to Johor** (Density Index: {cj})\n"
 
-        # To Woodlands Logic
-        if cw > 50 and prev_cw <= 50: 
-            msg += f"🛑 **NEW JAM to Woodlands** (Congestion Index: {cw})\n"
-        elif cw > 50 and cw >= (prev_cw + 15):
-            msg += f"📈 **JAM WORSENING to Woodlands** (Congestion Index: {cw})\n"
-        elif cw <= 20 and prev_cw > 20:
-            msg += f"✅ **JAM CLEARED to Woodlands** (Congestion Index: {cw})\n"
+        # To Woodlands Alert Logic (Only alert if the STATUS changes)
+        if curr_wood_status != prev_wood_status:
+            if curr_wood_status == "JAM":
+                msg += f"🛑 **JAM to Woodlands** (Density Index: {cw})\n"
+            elif curr_wood_status == "MODERATE":
+                msg += f"⚠️ **Moderate Traffic to Woodlands** (Density Index: {cw})\n"
+            elif curr_wood_status == "CLEAR":
+                msg += f"✅ **Cleared to Woodlands** (Density Index: {cw})\n"
             
-        # 4. SEND ALERT IF NEEDED
+        # Send Alert
         if msg:
             weather = get_weather()
             dashboard_url = "https://jamsniper.streamlit.app/" 
