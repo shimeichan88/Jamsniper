@@ -1,38 +1,24 @@
-import os
-import requests
+import streamlit as st
 import pandas as pd
-from PIL import Image
-from io import BytesIO
-from ultralytics import YOLO
-from datetime import datetime
-import pytz
+import requests
+import os
 
-# --- CONFIGURATION ---
-LTA_KEY = os.environ.get("LTA_API_KEY")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-CSV_PATH = "data.csv"
-IMG_PATH = "latest_traffic.jpg"
+# 1. PAGE CONFIGURATION
+st.set_page_config(page_title="JamSniper", layout="centered")
+st.title("🚦 JamSniper: Causeway Traffic")
 
-SHIFT = 0.28   
-TILT = 0.43
-
-def send_telegram(message):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True}
-    requests.post(url, json=payload)
-
+# 2. WEATHER FUNCTION
 def get_weather():
     try:
         url = "https://api.data.gov.sg/v1/environment/rainfall"
         data = requests.get(url).json()
         stations = data['metadata']['stations']
         readings = data['items'][0]['readings']
-        target_ids = ['S105', 'S104']
         
+        target_ids = ['S105', 'S104'] # Priority: Causeway -> Woodlands Ave 9
         rain_value = 0
         found = False
+        
         for target_id in target_ids:
             for i, station in enumerate(stations):
                 if station['id'] == target_id:
@@ -40,120 +26,67 @@ def get_weather():
                     found = True
                     break
             if found: break
-            
-        if not found: return "☁️ Unknown"
-        if rain_value == 0: return "☀️ Clear"
-        elif rain_value < 5: return "🌧️ Light Rain"
-        else: return "⛈️ Heavy Rain"
+        
+        if not found: return "☁️ Unknown", "All nearby sensors offline"
+        if rain_value == 0: return "☀️ Clear", "No rain detected."
+        elif rain_value < 5: return "🌧️ Light Rain", "Roads might be wet."
+        else: return "⛈️ Heavy Rain", "Visibility is poor!"
+        
     except Exception:
-        return "⚠️ Unavailable"
+        return "⚠️ Unavailable", "Could not load weather."
 
-def analyze_traffic():
-    url = "https://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
-    headers = {"AccountKey": LTA_KEY, "accept": "application/json"}
+# 3. DISPLAY WEATHER
+weather_status, weather_desc = get_weather()
+st.info(f"**Weather at Causeway:** {weather_status}\n\n_{weather_desc}_")
+
+# 4. SHOW THE LIVE IMAGE
+st.write("---")
+if os.path.exists("latest_traffic.jpg"):
+    st.image("latest_traffic.jpg", caption="Live View from Robot Eyes", use_column_width=True)
+else:
+    st.info("Waiting for the first image update... (Run the bot!)")
+
+# 5. LOAD & DISPLAY TRAFFIC DATA
+try:
+    df = pd.read_csv("data.csv")
     
-    try:
-        resp = requests.get(url, headers=headers).json()
-        target_link = next((i['ImageLink'] for i in resp['value'] if str(i['CameraID']) == "2701"), None)
-        if not target_link: return None, None
+    if not df.empty:
+        df['Time'] = pd.to_datetime(df['Time'])
+        latest = df.iloc[-1]
         
-        img_data = requests.get(target_link).content
-        with open(IMG_PATH, "wb") as f:
-            f.write(img_data)
-        
-        img = Image.open(BytesIO(img_data))
-        model = YOLO('yolov8m.pt')
-        results = model(img, imgsz=1280, conf=0.05, iou=0.7, classes=[2, 3, 5, 7])
-        
-        width, height = img.size
-        base_top = width * 0.60
-        base_bottom = width * 0.40
-        top_x = base_top + (width * SHIFT) + (width * TILT)
-        bottom_x = base_bottom + (width * SHIFT) - (width * TILT)
-        slope = (bottom_x - top_x) / height
-        
-        j_area_total = 0
-        w_area_total = 0
-        
-        for box in results[0].boxes:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            cx, cy = (x1 + x2)/2, (y1 + y2)/2
-            
-            if cy > (height * 0.60) and cx < (width * 0.30): continue 
-            
-            # --- NEW UPGRADE: CALCULATE AREA INSTEAD OF COUNTING ---
-            box_area = (x2 - x1) * (y2 - y1)
-            
-            divider_x = top_x + (slope * cy)
-            if cx < divider_x: j_area_total += box_area
-            else: w_area_total += box_area
-                
-        # Divide by 1000 to keep the index numbers small and readable
-        return int(j_area_total / 1000), int(w_area_total / 1000)
-        
-    except Exception as e:
-        print(f"Error: {e}")
-        return None, None
+        st.write(f"**Last Update:** {latest['Time']}")
 
-def get_traffic_status(index):
-    """Helper function to determine the current traffic state."""
-    if index < 40: return "CLEAR"
-    elif index < 80: return "MODERATE"
-    else: return "JAM"
-
-if __name__ == "__main__":
-    cj, cw = analyze_traffic()
-    
-    if cj is not None:
-        sg_time = datetime.now(pytz.timezone('Asia/Singapore'))
-        time_str = sg_time.strftime('%Y-%m-%d %H:%M')
+        # --- SCORECARDS (Updated for Density Index: 65/120) ---
+        col1, col2 = st.columns(2)
         
-        try: 
-            df = pd.read_csv(CSV_PATH)
-            if not df.empty:
-                prev_cj = float(df.iloc[-1]["To_Johor"])
-                prev_cw = float(df.iloc[-1]["To_Woodlands"])
-            else:
-                prev_cj, prev_cw = 0, 0
-        except: 
-            df = pd.DataFrame(columns=["Time", "Total_Count", "To_Johor", "To_Woodlands"])
-            prev_cj, prev_cw = 0, 0
+        # Card 1: To Johor
+        with col1:
+            st.metric("To Johor (Density Index)", int(latest["To_Johor"]))
+            if latest["To_Johor"] < 65: st.success("✅ CLEAR")
+            elif latest["To_Johor"] < 120: st.warning("⚠️ MODERATE") 
+            else: st.error("🛑 JAM")
             
-        new_row = {"Time": time_str, "Total_Count": cj+cw, "To_Johor": cj, "To_Woodlands": cw}
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        df.to_csv(CSV_PATH, index=False)
-        
-        # --- NEW UPGRADE: STATE MACHINE LOGIC ---
-        msg = ""
-        
-        # Get Previous and Current States
-        prev_johor_status = get_traffic_status(prev_cj)
-        curr_johor_status = get_traffic_status(cj)
-        
-        prev_wood_status = get_traffic_status(prev_cw)
-        curr_wood_status = get_traffic_status(cw)
-        
-        # To Johor Alert Logic (Only alert if the STATUS changes)
-        if curr_johor_status != prev_johor_status:
-            if curr_johor_status == "JAM":
-                msg += f"🛑 **JAM to Johor** (Density Index: {cj})\n"
-            elif curr_johor_status == "MODERATE":
-                msg += f"⚠️ **Moderate Traffic to Johor** (Density Index: {cj})\n"
-            elif curr_johor_status == "CLEAR":
-                msg += f"✅ **Cleared to Johor** (Density Index: {cj})\n"
-
-        # To Woodlands Alert Logic (Only alert if the STATUS changes)
-        if curr_wood_status != prev_wood_status:
-            if curr_wood_status == "JAM":
-                msg += f"🛑 **JAM to Woodlands** (Density Index: {cw})\n"
-            elif curr_wood_status == "MODERATE":
-                msg += f"⚠️ **Moderate Traffic to Woodlands** (Density Index: {cw})\n"
-            elif curr_wood_status == "CLEAR":
-                msg += f"✅ **Cleared to Woodlands** (Density Index: {cw})\n"
+        # Card 2: To Woodlands
+        with col2:
+            st.metric("To Woodlands (Density Index)", int(latest["To_Woodlands"]))
+            if latest["To_Woodlands"] < 65: st.success("✅ CLEAR")
+            elif latest["To_Woodlands"] < 120: st.warning("⚠️ MODERATE") 
+            else: st.error("🛑 JAM")
             
-        # Send Alert
-        if msg:
-            weather = get_weather()
-            dashboard_url = "https://jamsniper.streamlit.app/" 
-            full_msg = f"🚦 **Traffic Alert** ({time_str})\n\n{msg}\n**Weather:** {weather}\n\n📺 [View Live Cameras Here]({dashboard_url})"
-            send_telegram(full_msg)
+        # --- CHART (FIXED X-AXIS) ---
+        st.write("---")
+        st.subheader("📈 24-Hour Traffic Density Trend")
+        
+        chart_data = df.tail(48).copy()
+        chart_data["Display_Time"] = chart_data["Time"].dt.strftime("%H:%M")
+        st.line_chart(chart_data.set_index("Display_Time")[["To_Johor", "To_Woodlands"]])
+
+    else:
+        st.warning("Data file is empty. Wait for the bot to run.")
+
+except FileNotFoundError:
+    st.error("No data found! Please check if your 'JamSniper Bot' is running in GitHub Actions.")
+
+# 6. REFRESH BUTTON
+if st.button("Refresh Data"):
+    st.rerun()
