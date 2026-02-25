@@ -56,26 +56,26 @@ try:
         
         st.write(f"**Last Update:** {latest['Time']}")
 
-        # --- SCORECARDS (Updated Threshold: 50) ---
+        # --- SCORECARDS (Updated for Density Index: 40/80) ---
         col1, col2 = st.columns(2)
         
         # Card 1: To Johor
         with col1:
-            st.metric("To Johor", int(latest["To_Johor"]))
-            if latest["To_Johor"] < 25: st.success("✅ CLEAR")
-            elif latest["To_Johor"] < 50: st.warning("⚠️ MODERATE") # Changed to 50
+            st.metric("To Johor (Density Index)", int(latest["To_Johor"]))
+            if latest["To_Johor"] < 40: st.success("✅ CLEAR")
+            elif latest["To_Johor"] < 80: st.warning("⚠️ MODERATE") 
             else: st.error("🛑 JAM")
             
         # Card 2: To Woodlands
         with col2:
-            st.metric("To Woodlands", int(latest["To_Woodlands"]))
-            if latest["To_Woodlands"] < 25: st.success("✅ CLEAR")
-            elif latest["To_Woodlands"] < 50: st.warning("⚠️ MODERATE") # Changed to 50
+            st.metric("To Woodlands (Density Index)", int(latest["To_Woodlands"]))
+            if latest["To_Woodlands"] < 40: st.success("✅ CLEAR")
+            elif latest["To_Woodlands"] < 80: st.warning("⚠️ MODERATE") 
             else: st.error("🛑 JAM")
             
         # --- CHART (FIXED X-AXIS) ---
         st.write("---")
-        st.subheader("📈 24-Hour Trend")
+        st.subheader("📈 24-Hour Traffic Density Trend")
         
         chart_data = df.tail(48).copy()
         chart_data["Display_Time"] = chart_data["Time"].dt.strftime("%H:%M")
