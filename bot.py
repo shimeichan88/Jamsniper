@@ -1,92 +1,116 @@
-import streamlit as st
-import pandas as pd
-import requests
 import os
+import requests
+import pandas as pd
+from datetime import datetime
+import pytz
+from ultralytics import YOLO
 
-# 1. PAGE CONFIGURATION
-st.set_page_config(page_title="JamSniper", layout="centered")
-st.title("🚦 JamSniper: Causeway Traffic")
+# --- SECURE CREDENTIALS ---
+LTA_KEY = os.environ.get("LTA_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# 2. WEATHER FUNCTION
-def get_weather():
-    try:
-        url = "https://api.data.gov.sg/v1/environment/rainfall"
-        data = requests.get(url).json()
-        stations = data['metadata']['stations']
-        readings = data['items'][0]['readings']
-        
-        target_ids = ['S105', 'S104'] # Priority: Causeway -> Woodlands Ave 9
-        rain_value = 0
-        found = False
-        
-        for target_id in target_ids:
-            for i, station in enumerate(stations):
-                if station['id'] == target_id:
-                    rain_value = readings[i]['value']
-                    found = True
-                    break
-            if found: break
-        
-        if not found: return "☁️ Unknown", "All nearby sensors offline"
-        if rain_value == 0: return "☀️ Clear", "No rain detected."
-        elif rain_value < 5: return "🌧️ Light Rain", "Roads might be wet."
-        else: return "⛈️ Heavy Rain", "Visibility is poor!"
-        
-    except Exception:
-        return "⚠️ Unavailable", "Could not load weather."
-
-# 3. DISPLAY WEATHER
-weather_status, weather_desc = get_weather()
-st.info(f"**Weather at Causeway:** {weather_status}\n\n_{weather_desc}_")
-
-# 4. SHOW THE LIVE IMAGE
-st.write("---")
-if os.path.exists("latest_traffic.jpg"):
-    st.image("latest_traffic.jpg", caption="Live View from Robot Eyes", use_column_width=True)
-else:
-    st.info("Waiting for the first image update... (Run the bot!)")
-
-# 5. LOAD & DISPLAY TRAFFIC DATA
-try:
-    df = pd.read_csv("data.csv")
+# --- 1. FETCH IMAGE FROM LTA DATAMALL ---
+def download_traffic_image():
+    headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
+    url = "http://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
     
-    if not df.empty:
-        df['Time'] = pd.to_datetime(df['Time'])
-        latest = df.iloc[-1]
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
         
-        st.write(f"**Last Update:** {latest['Time']}")
+        for cam in data['value']:
+            if cam['CameraID'] == "2701":
+                img_url = cam['ImageLink']
+                img_data = requests.get(img_url).content
+                with open("latest_traffic.jpg", "wb") as f:
+                    f.write(img_data)
+                return True
+    except Exception as e:
+        print(f"Failed to download image: {e}")
+    return False
 
-        # --- SCORECARDS (Updated for Density Index: 65/120) ---
-        col1, col2 = st.columns(2)
+# --- 2. YOLOv8 INFERENCE (THE ROLLBACK + OCCLUSION UPGRADE) ---
+def analyze_traffic():
+    model = YOLO("yolov8n.pt") 
+    
+    # Lower confidence, higher IoU to catch hidden cars in jams
+    results = model("latest_traffic.jpg", conf=0.15, iou=0.6, classes=[2, 3, 5, 7])
+    
+    johor_count = 0
+    woodlands_count = 0
+    
+    boxes = results[0].boxes
+    img_width = results[0].orig_shape[1]
+    
+    SHIFT = 0.28 
+    divider = img_width * (0.5 + SHIFT)
+    
+    for box in boxes:
+        # We are back to simple counting: 1 Box = 1 Vehicle!
+        x1, y1, x2, y2 = box.xyxy[0].tolist()
+        center_x = (x1 + x2) / 2
         
-        # Card 1: To Johor
-        with col1:
-            st.metric("To Johor (Density Index)", int(latest["To_Johor"]))
-            if latest["To_Johor"] < 65: st.success("✅ CLEAR")
-            elif latest["To_Johor"] < 120: st.warning("⚠️ MODERATE") 
-            else: st.error("🛑 JAM")
+        if center_x > divider:
+            johor_count += 1
+        else:
+            woodlands_count += 1
             
-        # Card 2: To Woodlands
-        with col2:
-            st.metric("To Woodlands (Density Index)", int(latest["To_Woodlands"]))
-            if latest["To_Woodlands"] < 65: st.success("✅ CLEAR")
-            elif latest["To_Woodlands"] < 120: st.warning("⚠️ MODERATE") 
-            else: st.error("🛑 JAM")
-            
-        # --- CHART (FIXED X-AXIS) ---
-        st.write("---")
-        st.subheader("📈 24-Hour Traffic Density Trend")
-        
-        chart_data = df.tail(48).copy()
-        chart_data["Display_Time"] = chart_data["Time"].dt.strftime("%H:%M")
-        st.line_chart(chart_data.set_index("Display_Time")[["To_Johor", "To_Woodlands"]])
+    return johor_count, woodlands_count
 
+# --- 3. STATE MACHINE & THRESHOLDS ---
+def get_status(count):
+    if count < 25: return "CLEAR"
+    elif count < 50: return "MODERATE"
+    else: return "JAM"
+
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram credentials missing.")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    requests.post(url, json=payload)
+
+# --- MAIN EXECUTION ---
+if __name__ == "__main__":
+    print("Starting JamSniper Bot...")
+    
+    if download_traffic_image():
+        print("Image downloaded successfully. Running YOLOv8 AI...")
+        johor, woodlands = analyze_traffic()
+        
+        johor_status = get_status(johor)
+        woodlands_status = get_status(woodlands)
+        
+        sgt = pytz.timezone('Asia/Singapore')
+        now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M:00")
+        
+        csv_file = "data.csv"
+        if os.path.exists(csv_file):
+            df = pd.read_csv(csv_file)
+        else:
+            df = pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands"])
+            
+        new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands}
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        df.to_csv(csv_file, index=False)
+        print(f"Data saved: {johor} to Johor, {woodlands} to Woodlands.")
+        
+        if len(df) > 1:
+            prev_johor = get_status(df.iloc[-2]["To_Johor"])
+            prev_woodlands = get_status(df.iloc[-2]["To_Woodlands"])
+        else:
+            prev_johor, prev_woodlands = "", ""
+            
+        if johor_status != prev_johor or woodlands_status != prev_woodlands:
+            msg = (f"🚦 Causeway Traffic Update 🚦\n\n"
+                   f"🇲🇾 To Johor: {johor} ({johor_status})\n"
+                   f"🇸🇬 To Woodlands: {woodlands} ({woodlands_status})\n\n"
+                   f"🕒 {now}")
+            send_telegram(msg)
+            print("Telegram alert sent!")
+        else:
+            print("No status change. Skipping Telegram alert.")
     else:
-        st.warning("Data file is empty. Wait for the bot to run.")
-
-except FileNotFoundError:
-    st.error("No data found! Please check if your 'JamSniper Bot' is running in GitHub Actions.")
-
-# 6. REFRESH BUTTON
-if st.button("Refresh Data"):
-    st.rerun()
+        print("Failed to run pipeline: Could not download image.")
