@@ -15,7 +15,7 @@ def get_weather():
         stations = data['metadata']['stations']
         readings = data['items'][0]['readings']
         
-        target_ids = ['S105', 'S104'] # Priority: Causeway -> Woodlands Ave 9
+        target_ids = ['S105', 'S104']
         rain_value = 0
         found = False
         
@@ -56,26 +56,24 @@ try:
         
         st.write(f"**Last Update:** {latest['Time']}")
 
-        # --- SCORECARDS (Updated for Density Index: 40/80) ---
+        # --- SCORECARDS (Rolled back to pure count: 25/50) ---
         col1, col2 = st.columns(2)
         
-        # Card 1: To Johor
         with col1:
-            st.metric("To Johor (Density Index)", int(latest["To_Johor"]))
-            if latest["To_Johor"] < 40: st.success("✅ CLEAR")
-            elif latest["To_Johor"] < 80: st.warning("⚠️ MODERATE") 
+            st.metric("To Johor", int(latest["To_Johor"]))
+            if latest["To_Johor"] < 25: st.success("✅ CLEAR")
+            elif latest["To_Johor"] < 50: st.warning("⚠️ MODERATE") 
             else: st.error("🛑 JAM")
             
-        # Card 2: To Woodlands
         with col2:
-            st.metric("To Woodlands (Density Index)", int(latest["To_Woodlands"]))
-            if latest["To_Woodlands"] < 40: st.success("✅ CLEAR")
-            elif latest["To_Woodlands"] < 80: st.warning("⚠️ MODERATE") 
+            st.metric("To Woodlands", int(latest["To_Woodlands"]))
+            if latest["To_Woodlands"] < 25: st.success("✅ CLEAR")
+            elif latest["To_Woodlands"] < 50: st.warning("⚠️ MODERATE") 
             else: st.error("🛑 JAM")
             
-        # --- CHART (FIXED X-AXIS) ---
+        # --- CHART ---
         st.write("---")
-        st.subheader("📈 24-Hour Traffic Density Trend")
+        st.subheader("📈 24-Hour Traffic Trend")
         
         chart_data = df.tail(48).copy()
         chart_data["Display_Time"] = chart_data["Time"].dt.strftime("%H:%M")
@@ -85,8 +83,7 @@ try:
         st.warning("Data file is empty. Wait for the bot to run.")
 
 except FileNotFoundError:
-    st.error("No data found! Please check if your 'JamSniper Bot' is running in GitHub Actions.")
+    st.error("No data found!")
 
-# 6. REFRESH BUTTON
 if st.button("Refresh Data"):
     st.rerun()
