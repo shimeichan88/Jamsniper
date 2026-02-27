@@ -10,73 +10,56 @@ LTA_KEY = os.environ.get("LTA_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# --- 1. FETCH IMAGE FROM LTA DATAMALL ---
+def get_weather():
+    try:
+        url = "https://api.open-meteo.com/v1/forecast?latitude=1.4481&longitude=103.7757&current_weather=true"
+        response = requests.get(url).json()
+        return f"{response['current_weather']['temperature']}°C"
+    except:
+        return "N/A"
+
 def download_traffic_image():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
     url = "https://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
-    
     try:
         response = requests.get(url, headers=headers)
         if response.status_code != 200: return False
         data = response.json()
-        
         for cam in data['value']:
             if cam['CameraID'] == "2701":
-                img_url = cam['ImageLink']
-                img_data = requests.get(img_url).content
+                img_data = requests.get(cam['ImageLink']).content
                 with open("latest_traffic.jpg", "wb") as f:
                     f.write(img_data)
                 return True
-    except Exception as e:
-        print(f"Failed to download image: {e}")
+    except:
+        return False
     return False
 
-# --- 2. ANALYZE TRAFFIC WITH RELIABILITY FIXES ---
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    
-    # imgsz=1280 for HD eyes, conf=0.10 to catch distant vehicles
+    # HD Resolution + No Labels for a clean look
     results = model("latest_traffic.jpg", conf=0.10, iou=0.5, classes=[2, 3, 5, 7], imgsz=1280)
-    
-    # labels=False hides the percentage numbers for a cleaner look
     results[0].save("latest_traffic.jpg", labels=False) 
     
-    johor_raw = 0
-    woodlands_raw = 0
-    johor_buses = 0
-    woodlands_buses = 0
-    
+    j_raw, w_raw, j_buses, w_buses = 0, 0, 0, 0
     img_width = results[0].orig_shape[1]
-    divider = img_width * (0.5 + 0.28) # Your 78% divider line
+    divider = img_width * (0.5 + 0.28)
     
     for box in results[0].boxes:
         cls = int(box.cls[0])
-        x1, y1, x2, y2 = box.xyxy[0].tolist()
-        center_x = (x1 + x2) / 2
-        
-        # Determine Direction first
+        center_x = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         is_johor = center_x > divider
         
-        # Count Buses/Trucks (classes 5 and 7) by direction
-        if cls in [5, 7]:
-            if is_johor: johor_buses += 1
-            else: woodlands_buses += 1
-            
-        # Count Cars (classes 2 and 3) by direction
         if is_johor:
-            johor_raw += 1
+            j_raw += 1
+            if cls in [5, 7]: j_buses += 1
         else:
-            woodlands_raw += 1
+            w_raw += 1
+            if cls in [5, 7]: w_buses += 1
             
-    # Apply Multipliers for perspective
-    johor_total = int(johor_raw * 3)
-    woodlands_total = int(woodlands_raw * 1.5)
-            
-    return johor_total, woodlands_total, johor_buses, woodlands_buses
+    return int(j_raw * 3), int(w_raw * 1.5), j_buses, w_buses
 
-# --- 3. UPDATED THRESHOLDS FOR RELIABILITY ---
 def get_status(count):
-    # Because we use multipliers, a count of 25 means the bridge is physically full
     if count < 12: return "CLEAR"
     elif count < 25: return "MODERATE"
     else: return "JAM"
@@ -84,41 +67,36 @@ def get_status(count):
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    requests.post(url, json=payload)
+    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message})
 
-# --- MAIN EXECUTION ---
 if __name__ == "__main__":
     if download_traffic_image():
-        johor, woodlands, buses = analyze_traffic()
+        # FIXED: Receiving 4 variables now!
+        johor, woodlands, j_buses, w_buses = analyze_traffic()
+        weather = get_weather()
         
-        johor_status = get_status(johor)
-        woodlands_status = get_status(woodlands)
+        j_status = get_status(johor)
+        w_status = get_status(woodlands)
         
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
         csv_file = "data.csv"
-        if os.path.exists(csv_file):
-            df = pd.read_csv(csv_file)
-        else:
-            df = pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands", "Total", "Buses"])
+        df = pd.read_csv(csv_file) if os.path.exists(csv_file) else pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands", "J_Buses", "W_Buses", "Weather"])
             
-        new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "Total": johor + woodlands, "Buses": buses}
+        new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "J_Buses": j_buses, "W_Buses": w_buses, "Weather": weather}
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(csv_file, index=False)
         
-        # Determine if we need to send an alert
+        # Telegram Logic
+        msg = (f"🚦 Causeway Traffic Update 🚦\n\n"
+               f"🇲🇾 To Johor: {johor} ({j_status})\n"
+               f"🚌 Buses: {j_buses}\n\n"
+               f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n"
+               f"🚌 Buses: {w_buses}\n\n"
+               f"🕒 {now} | 🌡️ {weather}")
+        
+        # Only send if status changed
         if len(df) > 1:
-            prev_johor = get_status(df.iloc[-2]["To_Johor"])
-            prev_woodlands = get_status(df.iloc[-2]["To_Woodlands"])
-        else:
-            prev_johor, prev_woodlands = "", ""
-            
-        if johor_status != prev_johor or woodlands_status != prev_woodlands:
-            msg = (f"🚦 Causeway Traffic Update 🚦\n\n"
-                   f"🇲🇾 To Johor: {johor} ({johor_status})\n"
-                   f"🇸🇬 To Woodlands: {woodlands} ({woodlands_status})\n"
-                   f"🚌 Buses/Trucks Detected: {buses}\n\n"
-                   f"🕒 {now}")
-            send_telegram(msg)
+            if j_status != get_status(df.iloc[-2]["To_Johor"]) or w_status != get_status(df.iloc[-2]["To_Woodlands"]):
+                send_telegram(msg)
