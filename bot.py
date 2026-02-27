@@ -36,8 +36,7 @@ def download_traffic_image():
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
     
-    # Lower confidence, higher IoU to catch hidden cars in jams
-    results = model("latest_traffic.jpg", conf=0.15, iou=0.6, classes=[2, 3, 5, 7])
+    results = model("latest_traffic.jpg", conf=0.10, iou=0.5, classes=[2, 3, 5, 7], imgsz=1280)
     
     johor_count = 0
     woodlands_count = 0
