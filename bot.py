@@ -86,18 +86,22 @@ if __name__ == "__main__":
         woodlands_status = get_status(woodlands)
         
         sgt = pytz.timezone('Asia/Singapore')
-        now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M:00")
+        
+        # --- THE FIXES ARE RIGHT HERE ---
+        now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
+        total_cars = johor + woodlands 
+        # --------------------------------
         
         csv_file = "data.csv"
         if os.path.exists(csv_file):
             df = pd.read_csv(csv_file)
         else:
-            df = pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands"])
+            df = pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands", "Total"])
             
-        new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands}
+        new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "Total": total_cars}
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(csv_file, index=False)
-        print(f"Data saved: {johor} to Johor, {woodlands} to Woodlands.")
+        print(f"Data saved: {johor} to Johor, {woodlands} to Woodlands. Total: {total_cars}")
         
         if len(df) > 1:
             prev_johor = get_status(df.iloc[-2]["To_Johor"])
