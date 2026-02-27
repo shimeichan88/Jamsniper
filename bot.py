@@ -17,6 +17,8 @@ def download_traffic_image():
     
     try:
         response = requests.get(url, headers=headers)
+        print(f"LTA Server Status Code: {response.status_code}")
+        if response.status_code != 200: print(f"Server Message: {response.text[:200]}")
         data = response.json()
         
         for cam in data['value']:
