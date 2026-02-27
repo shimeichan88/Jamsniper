@@ -36,7 +36,7 @@ jobs:
       run: |
         git config --global user.name 'JamSniper Bot'
         git config --global user.email 'bot@noreply.github.com'
-        git pull origin main --rebase  # This fetches your 'delete' action from GitHub
+        # This ignores the 'pull' errors and just overwrites GitHub with the new file
         git add data.csv latest_traffic.jpg
         git commit -m "🚦 Auto-update traffic data" || exit 0
-        git push origin main
+        git push origin main --force
