@@ -14,17 +14,20 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 def get_weather():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=1.4481&longitude=103.7757&current_weather=true"
-        response = requests.get(url).json()
-        temp = response['current_weather']['temperature']
-        code = response['current_weather']['weathercode']
+        data = requests.get(url).json()
+        temp = data['current_weather']['temperature']
+        code = data['current_weather']['weathercode']
         
-        # Mapping weather codes to icons
-        rain_status = ""
-        if code in [51, 53, 55]: rain_status = " | 🌧️ Drizzle"
-        elif code in [61, 63, 65, 80, 81]: rain_status = " | ⛈️ Rain"
-        elif code in [66, 67, 82]: rain_status = " | 🌊 Heavy Rain"
+        # Exact Weather Levels you requested
+        rain_text = "No Rain Detected"
+        if code in [51, 53, 55]: 
+            rain_text = "Drizzle"
+        elif code in [61, 63, 65, 80, 81]: 
+            rain_text = "Rain"
+        elif code in [66, 67, 82]: 
+            rain_text = "Heavy Rain"
             
-        return f"{temp}°C{rain_status}"
+        return f"{temp}°C | {rain_text}"
     except:
         return "N/A"
 
@@ -47,21 +50,14 @@ def download_traffic_image():
 
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    # Using your preferred sensitivity (0.10) and HD (1280)
     results = model("latest_traffic.jpg", conf=0.10, iou=0.5, classes=[2, 3, 5, 7], imgsz=1280)
     
-    # Save base AI detections
+    # Still saving image locally for the website, but we won't send it to Telegram
     results[0].save("latest_traffic.jpg", labels=False) 
-    
-    # Load image for diagonal line drawing
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
+    top_x, bottom_x = int(w * 0.78), int(w * 0.45)
     
-    # SETTINGS: 78% at top, 45% at bottom to match road perspective
-    top_x = int(w * 0.78)
-    bottom_x = int(w * 0.45)
-    
-    # Draw green diagonal line
     cv2.line(img, (top_x, 0), (bottom_x, h), (0, 255, 0), 5)
     cv2.imwrite("latest_traffic.jpg", img)
     
@@ -69,16 +65,10 @@ def analyze_traffic():
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
-        
-        # Geometry: Is the car center right of the diagonal line?
-        line_x_at_y = bottom_x + (top_x - bottom_x) * (cy / h)
-        
-        if cx > line_x_at_y:
-            j_raw += 1
-        else:
-            w_raw += 1
+        line_x = bottom_x + (top_x - bottom_x) * (cy / h)
+        if cx > line_x: j_raw += 1
+        else: w_raw += 1
             
-    # Multipliers: 3x for Johor, 1.5x for Woodlands
     return int(j_raw * 3), int(w_raw * 1.5)
 
 def get_status(count):
@@ -86,24 +76,18 @@ def get_status(count):
     elif count <= 35: return "MODERATE"
     else: return "JAM"
 
-def send_telegram(message, image_path):
+def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
-    # Send message with weather
+    # Removed the sendPhoto logic to keep Telegram text-only
     url_msg = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url_msg, json={"chat_id": TELEGRAM_CHAT_ID, "text": message})
-    # Send processed photo with green line
-    url_img = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    with open(image_path, 'rb') as f:
-        requests.post(url_img, data={"chat_id": TELEGRAM_CHAT_ID}, files={"photo": f})
 
 if __name__ == "__main__":
     if download_traffic_image():
         johor, woodlands = analyze_traffic()
         weather = get_weather()
         
-        j_status = get_status(johor)
-        w_status = get_status(woodlands)
-        
+        j_status, w_status = get_status(johor), get_status(woodlands)
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
@@ -113,14 +97,16 @@ if __name__ == "__main__":
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(csv_file, index=False)
         
+        # Exact message format you requested
         msg = (f"🚦 Causeway Traffic Update 🚦\n\n"
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
                f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
-               f"🕒 {now} | 🌡️ {weather}")
+               f"🕒 {now} | {weather}\n"
+               f"https://jamsniper.streamlit.app/")
         
-        # Notify if status changes
         if len(df) > 1:
             prev_j = get_status(df.iloc[-2]["To_Johor"])
             prev_w = get_status(df.iloc[-2]["To_Woodlands"])
+            # Only send Telegram if status changes
             if j_status != prev_j or w_status != prev_w:
-                send_telegram(msg, "latest_traffic.jpg")
+                send_telegram(msg)
