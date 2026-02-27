@@ -12,6 +12,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def get_weather():
     try:
+        # Fetches current temperature for the Woodlands/Causeway area
         url = "https://api.open-meteo.com/v1/forecast?latitude=1.4481&longitude=103.7757&current_weather=true"
         response = requests.get(url).json()
         return f"{response['current_weather']['temperature']}°C"
@@ -26,7 +27,7 @@ def download_traffic_image():
         if response.status_code != 200: return False
         data = response.json()
         for cam in data['value']:
-            if cam['CameraID'] == "2701":
+            if cam['CameraID'] == "2701": # Woodlands Causeway camera
                 img_data = requests.get(cam['ImageLink']).content
                 with open("latest_traffic.jpg", "wb") as f:
                     f.write(img_data)
@@ -37,13 +38,13 @@ def download_traffic_image():
 
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    # HD Eyes (1280) and clean boxes (labels=False)
+    # Use HD (1280) and hide labels for a professional, clean look
     results = model("latest_traffic.jpg", conf=0.10, iou=0.5, classes=[2, 3, 5, 7], imgsz=1280)
     results[0].save("latest_traffic.jpg", labels=False) 
     
     j_raw, w_raw = 0, 0
     img_width = results[0].orig_shape[1]
-    divider = img_width * (0.5 + 0.28) # 78% mark
+    divider = img_width * (0.5 + 0.28) # Your 78% mark logic
     
     for box in results[0].boxes:
         center_x = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
@@ -52,10 +53,11 @@ def analyze_traffic():
         else:
             w_raw += 1
             
-    # Applying the "Truth Multipliers" for the Causeway perspective
+    # Apply "Causeway Perspective" multipliers to estimate total volume accurately
     return int(j_raw * 3), int(w_raw * 1.5)
 
 def get_status(count):
+    # Calibrated thresholds based on the new multiplier logic
     if count < 12: return "CLEAR"
     elif count < 25: return "MODERATE"
     else: return "JAM"
@@ -76,20 +78,20 @@ if __name__ == "__main__":
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
-        # Save to CSV
+        # This line handles the creation of a new CSV if you deleted the old one
         csv_file = "data.csv"
         df = pd.read_csv(csv_file) if os.path.exists(csv_file) else pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands", "Weather"])
+        
         new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "Weather": weather}
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(csv_file, index=False)
         
-        # Prepare Message
         msg = (f"🚦 Causeway Traffic Update 🚦\n\n"
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
                f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
                f"🕒 {now} | 🌡️ {weather}")
         
-        # Send alert only if status changes
+        # Logic to only alert you when the traffic level changes
         if len(df) > 1:
             prev_j = get_status(df.iloc[-2]["To_Johor"])
             prev_w = get_status(df.iloc[-2]["To_Woodlands"])
