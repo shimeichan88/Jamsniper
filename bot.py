@@ -35,41 +35,44 @@ def download_traffic_image():
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
     
-    # FIX 1: Use HD Resolution (1280) and lower confidence to catch distant cars
+    # imgsz=1280 for HD eyes, conf=0.10 to catch distant vehicles
     results = model("latest_traffic.jpg", conf=0.10, iou=0.5, classes=[2, 3, 5, 7], imgsz=1280)
     
-    # FIX 2: Save the "Robot Eyes" version with pink boxes for your website
-    results[0].save("latest_traffic.jpg") 
+    # labels=False hides the percentage numbers for a cleaner look
+    results[0].save("latest_traffic.jpg", labels=False) 
     
     johor_raw = 0
     woodlands_raw = 0
-    bus_count = 0
+    johor_buses = 0
+    woodlands_buses = 0
     
-    boxes = results[0].boxes
     img_width = results[0].orig_shape[1]
+    divider = img_width * (0.5 + 0.28) # Your 78% divider line
     
-    # Your 78% divider line
-    divider = img_width * (0.5 + 0.28)
-    
-    for box in boxes:
+    for box in results[0].boxes:
         cls = int(box.cls[0])
-        if cls in [5, 7]: # Track Buses and Trucks separately
-            bus_count += 1
-            
         x1, y1, x2, y2 = box.xyxy[0].tolist()
         center_x = (x1 + x2) / 2
         
-        if center_x > divider:
+        # Determine Direction first
+        is_johor = center_x > divider
+        
+        # Count Buses/Trucks (classes 5 and 7) by direction
+        if cls in [5, 7]:
+            if is_johor: johor_buses += 1
+            else: woodlands_buses += 1
+            
+        # Count Cars (classes 2 and 3) by direction
+        if is_johor:
             johor_raw += 1
         else:
             woodlands_raw += 1
             
-    # FIX 3: Multipliers to account for perspective squashing
-    # Johor is far away (x3 boost), Woodlands is closer but still packed (x1.5 boost)
+    # Apply Multipliers for perspective
     johor_total = int(johor_raw * 3)
     woodlands_total = int(woodlands_raw * 1.5)
             
-    return johor_total, woodlands_total, bus_count
+    return johor_total, woodlands_total, johor_buses, woodlands_buses
 
 # --- 3. UPDATED THRESHOLDS FOR RELIABILITY ---
 def get_status(count):
