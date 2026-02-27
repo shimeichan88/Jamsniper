@@ -13,7 +13,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # --- 1. FETCH IMAGE FROM LTA DATAMALL ---
 def download_traffic_image():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
-    url = "http://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
+    url = "https://datamall2.mytransport.sg/ltaodataservice/Traffic-Imagesv2"
     
     try:
         response = requests.get(url, headers=headers)
