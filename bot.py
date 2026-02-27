@@ -37,27 +37,23 @@ def download_traffic_image():
 
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    # HD Resolution + No Labels for a clean look
+    # HD Eyes (1280) and clean boxes (labels=False)
     results = model("latest_traffic.jpg", conf=0.10, iou=0.5, classes=[2, 3, 5, 7], imgsz=1280)
     results[0].save("latest_traffic.jpg", labels=False) 
     
-    j_raw, w_raw, j_buses, w_buses = 0, 0, 0, 0
+    j_raw, w_raw = 0, 0
     img_width = results[0].orig_shape[1]
-    divider = img_width * (0.5 + 0.28)
+    divider = img_width * (0.5 + 0.28) # 78% mark
     
     for box in results[0].boxes:
-        cls = int(box.cls[0])
         center_x = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
-        is_johor = center_x > divider
-        
-        if is_johor:
+        if center_x > divider:
             j_raw += 1
-            if cls in [5, 7]: j_buses += 1
         else:
             w_raw += 1
-            if cls in [5, 7]: w_buses += 1
             
-    return int(j_raw * 3), int(w_raw * 1.5), j_buses, w_buses
+    # Applying the "Truth Multipliers" for the Causeway perspective
+    return int(j_raw * 3), int(w_raw * 1.5)
 
 def get_status(count):
     if count < 12: return "CLEAR"
@@ -71,8 +67,7 @@ def send_telegram(message):
 
 if __name__ == "__main__":
     if download_traffic_image():
-        # FIXED: Receiving 4 variables now!
-        johor, woodlands, j_buses, w_buses = analyze_traffic()
+        johor, woodlands = analyze_traffic()
         weather = get_weather()
         
         j_status = get_status(johor)
@@ -81,22 +76,22 @@ if __name__ == "__main__":
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
+        # Save to CSV
         csv_file = "data.csv"
-        df = pd.read_csv(csv_file) if os.path.exists(csv_file) else pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands", "J_Buses", "W_Buses", "Weather"])
-            
-        new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "J_Buses": j_buses, "W_Buses": w_buses, "Weather": weather}
+        df = pd.read_csv(csv_file) if os.path.exists(csv_file) else pd.DataFrame(columns=["Time", "To_Johor", "To_Woodlands", "Weather"])
+        new_row = {"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "Weather": weather}
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(csv_file, index=False)
         
-        # Telegram Logic
+        # Prepare Message
         msg = (f"🚦 Causeway Traffic Update 🚦\n\n"
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
-               f"🚌 Buses: {j_buses}\n\n"
-               f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n"
-               f"🚌 Buses: {w_buses}\n\n"
+               f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
                f"🕒 {now} | 🌡️ {weather}")
         
-        # Only send if status changed
+        # Send alert only if status changes
         if len(df) > 1:
-            if j_status != get_status(df.iloc[-2]["To_Johor"]) or w_status != get_status(df.iloc[-2]["To_Woodlands"]):
+            prev_j = get_status(df.iloc[-2]["To_Johor"])
+            prev_w = get_status(df.iloc[-2]["To_Woodlands"])
+            if j_status != prev_j or w_status != prev_w:
                 send_telegram(msg)
