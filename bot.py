@@ -39,8 +39,12 @@ def download_traffic_image():
     return False
 
 def analyze_traffic():
+    # Load model once
     model = YOLO("yolov8n.pt") 
-    results = model("latest_traffic.jpg", conf=0.01, classes=[2, 3, 5, 7], imgsz=1280)
+    
+    # FIX 1: Increased confidence from 0.01 to 0.25 to ignore false detections
+    results = model("latest_traffic.jpg", conf=0.25, classes=[2, 3, 5, 7], imgsz=1280)
+    
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
     
@@ -51,16 +55,18 @@ def analyze_traffic():
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
+        
+        # Calculate where the divider line is at this vertical position (cy)
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
-        # --- NEW POWER CURVE MATH ---
-        # 1. Calculate height ratio (0.0 at bottom, 1.0 at top)
-        # We cap cy between 0 and h to avoid math errors
+        # --- NEW ACCURACY MATH ---
+        # Height ratio: 0.0 at bottom (close), 1.0 at top (horizon)
         norm_h = max(0, min(1.0, 1.0 - (cy / h)))
         
-        # 2. Apply the Curve: weight = base + (height^2 * multiplier)
-        # This makes distant cars (high norm_h) count for MUCH more
-        weight = 1.2 + (norm_h ** 2) * 45.0 
+        # FIX 2: weight = 0.8 base + (height cubed * 25)
+        # Cubing (norm_h**3) keeps the weight VERY low for the foreground 
+        # but still allows it to spike for the far jam.
+        weight = 0.8 + (norm_h ** 3) * 25.0 
             
         if cx < line_x: 
             j_val += weight
