@@ -11,10 +11,12 @@ LTA_KEY = os.environ.get("LTA_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# --- MANUAL SLIDERS: ADJUST TO MATCH YOUR RED LINE ---
-# Lower numbers move the line LEFT, higher numbers move it RIGHT
-SHIFT_TOP = 0.62    # Moved left to match your red line drawing
-SHIFT_BOTTOM = 0.25 # Moved left to match your red line drawing
+# --- MANUAL COORDINATES
+TX = 1.0   # Top X (Horizontal)
+TY = 0.31  # Top Y (Vertical - moved down from top)
+BX = 0.35  # Bottom X (Horizontal)
+BY = 0.93  # Bottom Y (Vertical - moved up from bottom)
+
 CONFIDENCE = 0.10   # Sensitivity
 
 def get_weather():
