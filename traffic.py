@@ -10,14 +10,14 @@ import pytz
 st.set_page_config(page_title="JamSniper", layout="centered")
 st.title("🚦 JamSniper: Causeway Traffic")
 
-# --- SIDEBAR: 4 SLIDERS (Restored with your points) ---
+# --- SIDEBAR: 4 SLIDERS (Requested for 'downward' movement) ---
 st.sidebar.title("📏 Line Calibration")
 tx = st.sidebar.slider("Top X", 0.0, 1.0, 1.0)
 ty = st.sidebar.slider("Top Y", 0.0, 1.0, 0.31)
 bx = st.sidebar.slider("Bottom X", 0.0, 1.0, 0.35)
 by = st.sidebar.slider("Bottom Y", 0.0, 1.0, 0.93)
 
-# 2. WEATHER FUNCTION (Restored your original logic)
+# 2. WEATHER FUNCTION (RESTORED ORIGINAL SENSOR LOGIC)
 def get_weather():
     try:
         url = "https://api.data.gov.sg/v1/environment/rainfall"
@@ -43,7 +43,7 @@ def get_weather():
 weather_status, weather_desc = get_weather()
 st.info(f"**Weather at Causeway:** {weather_status}\n\n_{weather_desc}_")
 
-# 3. LIVE IMAGE (Restored with your divider)
+# 3. LIVE IMAGE
 st.write("---")
 if os.path.exists("latest_traffic.jpg"):
     img = cv2.imread("latest_traffic.jpg")
@@ -53,7 +53,7 @@ if os.path.exists("latest_traffic.jpg"):
     cv2.line(img, start, end, (0, 255, 0), 10)
     st.image(img, caption="Live View from Robot Eyes", use_container_width=True)
 
-# 4. LOAD & DISPLAY TRAFFIC DATA (Restored Analytics)
+# 4. LOAD & DISPLAY TRAFFIC DATA (RESTORED SCORECARDS & ANALYTICS)
 try:
     df = pd.read_csv("data.csv")
     if not df.empty:
@@ -63,30 +63,34 @@ try:
 
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("To Johor", int(latest["To_Johor"]))
-            j_stat = "✅ CLEAR" if latest["To_Johor"] < 25 else "⚠️ MODERATE" if latest["To_Johor"] < 50 else "🛑 JAM"
-            st.write(j_stat)
+            val_j = int(latest["To_Johor"])
+            st.metric("To Johor", val_j)
+            if val_j < 25: st.success("✅ CLEAR")
+            elif val_j < 50: st.warning("⚠️ MODERATE") 
+            else: st.error("🛑 JAM")
+            
         with col2:
-            st.metric("To Woodlands", int(latest["To_Woodlands"]))
-            w_stat = "✅ CLEAR" if latest["To_Woodlands"] < 25 else "⚠️ MODERATE" if latest["To_Woodlands"] < 50 else "🛑 JAM"
-            st.write(w_stat)
+            val_w = int(latest["To_Woodlands"])
+            st.metric("To Woodlands", val_w)
+            if val_w < 25: st.success("✅ CLEAR")
+            elif val_w < 50: st.warning("⚠️ MODERATE") 
+            else: st.error("🛑 JAM")
 
-        if st.button("Send Telegram Now"):
-            now = datetime.now(pytz.timezone('Asia/Singapore')).strftime("%Y-%m-%d %H:%M")
-            msg = (f"🚦 <b>Causeway Traffic Update</b> 🚦\n\n"
-                   f"🇲🇾 To Johor: {int(latest['To_Johor'])} ({j_stat.split()[-1]})\n"
-                   f"🇸🇬 To Woodlands: {int(latest['To_Woodlands'])} ({w_stat.split()[-1]})\n\n"
-                   f"🕒 {now} | 27.7°C | {weather_status}\n"
-                   f"<a href='https://jamsniper.streamlit.app/'>View Live Cameras Here</a>")
-            requests.post(f"https://api.telegram.org/bot{os.environ.get('TELEGRAM_TOKEN')}/sendMessage", 
-                          json={"chat_id": os.environ.get("TELEGRAM_CHAT_ID"), "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True})
-            st.success("Sent!")
-
+        # 📈 24-HOUR TREND (RESTORED)
         st.write("---")
         st.subheader("📈 24-Hour Traffic Trend")
         chart_data = df.tail(48).copy()
         chart_data["Display_Time"] = chart_data["Time"].dt.strftime("%H:%M")
         st.line_chart(chart_data.set_index("Display_Time")[["To_Johor", "To_Woodlands"]])
 
-except FileNotFoundError: st.error("No data found!")
-if st.button("Refresh Data"): st.rerun()
+        # 📊 SUB-BUSINESS PROBLEM 1 (NEW: Horizontal Bar Chart)
+        st.write("---")
+        st.subheader("📊 Current Traffic Distribution")
+        dist_df = pd.DataFrame({
+            'Direction': ['To Johor', 'To Woodlands'],
+            'Vehicles': [val_j, val_w]
+        })
+        st.bar_chart(dist_df.set_index('Direction'), horizontal=True)
+
+except FileNotFoundError: st.error("No data.csv found!")
+if st.button("Refresh Page"): st.rerun()
