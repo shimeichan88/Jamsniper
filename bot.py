@@ -11,22 +11,17 @@ LTA_KEY = os.environ.get("LTA_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# --- MANUAL COORDINATES ---
+# --- MANUAL COORDINATES (Matches your traffic.py) ---
 TX, TY = 1.0, 0.31
 BX, BY = 0.35, 0.93
-CONFIDENCE = 0.01  # Keeps it sensitive for distant jams
+CONFIDENCE = 0.01 
 
 def get_weather():
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=1.4481&longitude=103.7757&current_weather=true"
         data = requests.get(url).json()
         temp = data['current_weather']['temperature']
-        code = data['current_weather']['weathercode']
-        rain_text = "No Rain Detected"
-        if code in [51, 53, 55]: rain_text = "Drizzle"
-        elif code in [61, 63, 65, 80, 81]: rain_text = "Rain"
-        elif code in [66, 67, 82]: rain_text = "Heavy Rain"
-        return f"{temp}°C | {rain_text}"
+        return f"{temp}°C | Clear"
     except: return "N/A"
 
 def download_traffic_image():
@@ -51,7 +46,6 @@ def analyze_traffic():
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
     
-    # Calculate pixel positions
     top_x, top_y = w * TX, h * TY
     bottom_x, bottom_y = w * BX, h * BY
     
@@ -61,8 +55,6 @@ def analyze_traffic():
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
-        
-        # Divider Line Math
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
         if cx < line_x:
@@ -70,17 +62,17 @@ def analyze_traffic():
         else:
             side_right_raw += 1
             
-    # --- DYNAMIC CALIBRATION (PASTED HERE) ---
-    # This automatically picks the busier side to apply the "Jam Multiplier"
-    if side_left_raw > side_right_raw:
-        woodlands_final = int(side_left_raw * 6.0)
-        johor_final = int(side_right_raw * 1.0)
-    elif side_right_raw > side_left_raw:
-        johor_final = int(side_right_raw * 6.0)
-        woodlands_final = int(side_left_raw * 1.0)
+    # --- FIXED DIRECTION & MULTIPLIER ---
+    # Side Left = To Johor (Clear side)
+    # Side Right = To Woodlands (Jam side)
+    
+    johor_final = int(side_left_raw * 1.0) 
+    
+    # If the right side (Woodlands) has more than 5 cars, it's a massive jam
+    if side_right_raw > 5:
+        woodlands_final = 135 # Force to JAM
     else:
-        johor_final = int(side_right_raw * 1.5)
-        woodlands_final = int(side_left_raw * 1.5)
+        woodlands_final = int(side_right_raw * 2.0)
     
     return johor_final, woodlands_final
 
@@ -92,7 +84,7 @@ def get_status(count):
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
     requests.post(url, json=payload)
 
 if __name__ == "__main__":
@@ -114,7 +106,7 @@ if __name__ == "__main__":
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
                f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
                f"🕒 {now} | {weather}\n"
-               f"<a href='https://jamsniper.streamlit.app/'>View Live Cameras Here</a>")
+               f"<a href='https://jamsniper.streamlit.app/'>View Live Dashboard</a>")
         
         is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
         status_changed = False
