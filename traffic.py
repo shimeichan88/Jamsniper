@@ -39,13 +39,13 @@ try:
         col1, col2 = st.columns(2)
         with col1:
             st.metric("To Johor 🇲🇾", val_j)
-            if val_j < 40: st.success("✅ CLEAR")
+            if val_j < 56: st.success("✅ CLEAR")
             elif val_j < 100: st.warning("⚠️ MODERATE") 
             else: st.error("🛑 JAM")
             
         with col2:
             st.metric("To Woodlands 🇸🇬", val_w)
-            if val_w < 40: st.success("✅ CLEAR")
+            if val_w < 56: st.success("✅ CLEAR")
             elif val_w < 100: st.warning("⚠️ MODERATE") 
             else: st.error("🛑 JAM")
 

@@ -62,7 +62,7 @@ def analyze_traffic():
     return int(j_val), int(w_val)
 
 def get_status(count):
-    if count < 40: return "CLEAR"
+    if count < 56: return "CLEAR"
     elif count < 100: return "MODERATE"
     else: return "JAM"
 
