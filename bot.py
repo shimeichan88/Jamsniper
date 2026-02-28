@@ -40,10 +40,8 @@ def download_traffic_image():
 
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    
-    # 1. RAISE CONFIDENCE: 0.15 means "Only count it if you are 15% sure it's a car"
-    # This will stop the "fake" 149 count on an empty road.
-    results = model("latest_traffic.jpg", conf=0.15, classes=[2, 3, 5, 7], imgsz=1280)
+    # conf=0.20 ensures we only count real cars, keeping Johor around 30-40
+    results = model("latest_traffic.jpg", conf=0.20, classes=[2, 3, 5, 7], imgsz=1280)
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
@@ -59,15 +57,11 @@ def analyze_traffic():
         
         norm_h = max(0, min(1.0, 1.0 - (cy / h)))
         
-        # 2. ADJUSTED WEIGHT: 
-        # Base weight 1.0 + (Height^3 * 45)
-        # This makes distant clusters worth about 25-35 points each.
-        weight = 1.0 + (norm_h ** 3) * 45.0 
+        # This math keeps Johor low (~0.8 per car) and Woodlands high (~40 per cluster)
+        weight = 0.8 + (norm_h ** 3) * 60.0 
             
-        if cx < line_x: 
-            j_val += weight
-        else: 
-            w_val += weight
+        if cx < line_x: j_val += weight
+        else: w_val += weight
             
     return int(j_val), int(w_val)
 
@@ -99,7 +93,7 @@ if __name__ == "__main__":
             df = new_row
         df.to_csv("data.csv", index=False)
         
-        # Final Message
+        # --- REVERTED MESSAGE FORMAT ---
         msg = (f"🚦 <b>Causeway Traffic Update</b>\n\n"
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
                f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
