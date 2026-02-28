@@ -11,13 +11,10 @@ LTA_KEY = os.environ.get("LTA_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# --- MANUAL COORDINATES (Matches your traffic.py calibration) ---
-TX = 1.0   # Top X
-TY = 0.31  # Top Y
-BX = 0.35  # Bottom X
-BY = 0.93  # Bottom Y
-
-CONFIDENCE = 0.10   # Sensitivity
+# --- MANUAL COORDINATES ---
+TX, TY = 1.0, 0.31
+BX, BY = 0.35, 0.93
+CONFIDENCE = 0.01  # Keeps it sensitive for distant jams
 
 def get_weather():
     try:
@@ -25,15 +22,12 @@ def get_weather():
         data = requests.get(url).json()
         temp = data['current_weather']['temperature']
         code = data['current_weather']['weathercode']
-        
         rain_text = "No Rain Detected"
         if code in [51, 53, 55]: rain_text = "Drizzle"
         elif code in [61, 63, 65, 80, 81]: rain_text = "Rain"
         elif code in [66, 67, 82]: rain_text = "Heavy Rain"
-            
         return f"{temp}°C | {rain_text}"
-    except:
-        return "N/A"
+    except: return "N/A"
 
 def download_traffic_image():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
@@ -57,43 +51,48 @@ def analyze_traffic():
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
     
-    # Calculate pixel positions for your line
+    # Calculate pixel positions
     top_x, top_y = w * TX, h * TY
     bottom_x, bottom_y = w * BX, h * BY
     
-    j_raw, w_raw = 0, 0
+    side_left_raw = 0  
+    side_right_raw = 0 
+    
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
         
-        # FIXED: Removed the 'if top_y <= cy <= bottom_y' restriction.
-        # This math calculates the X-coordinate of the divider line at the specific height (cy) of the car.
-        # Formula: x = x2 + (x1 - x2) * (y - y2) / (y1 - y2)
+        # Divider Line Math
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
-        # Classification based on which side of the line the center-point (cx) is on
-        if cx > line_x: j_raw += 1
-        else: w_raw += 1
+        if cx < line_x:
+            side_left_raw += 1
+        else:
+            side_right_raw += 1
             
-    return int(j_raw * 3), int(w_raw * 1.5)
+    # --- DYNAMIC CALIBRATION (PASTED HERE) ---
+    # This automatically picks the busier side to apply the "Jam Multiplier"
+    if side_left_raw > side_right_raw:
+        woodlands_final = int(side_left_raw * 6.0)
+        johor_final = int(side_right_raw * 1.0)
+    elif side_right_raw > side_left_raw:
+        johor_final = int(side_right_raw * 6.0)
+        woodlands_final = int(side_left_raw * 1.0)
+    else:
+        johor_final = int(side_right_raw * 1.5)
+        woodlands_final = int(side_left_raw * 1.5)
+    
+    return johor_final, woodlands_final
 
 def get_status(count):
-    if count < 25:      # 0 to 24 is Clear
-        return "CLEAR"
-    elif count < 50:    # 25 to 49 is Moderate
-        return "MODERATE"
-    else:               # 50 and above is Jam
-        return "JAM"
+    if count < 25: return "CLEAR"
+    elif count < 50: return "MODERATE"
+    else: return "JAM"
 
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     requests.post(url, json=payload)
 
 if __name__ == "__main__":
@@ -107,32 +106,22 @@ if __name__ == "__main__":
         
         csv_file = "data.csv"
         df_old = pd.read_csv(csv_file) if os.path.exists(csv_file) else pd.DataFrame()
-        
-        # Prepare and save new data
         new_row = pd.DataFrame([{"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "Weather": weather}])
         df = pd.concat([df_old, new_row], ignore_index=True)
         df.to_csv(csv_file, index=False)
         
-        # --- TELEGRAM NOTIFICATION LOGIC ---
         msg = (f"🚦 <b>Causeway Traffic Update</b> 🚦\n\n"
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
                f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
                f"🕒 {now} | {weather}\n"
                f"<a href='https://jamsniper.streamlit.app/'>View Live Cameras Here</a>")
         
-        # 1. Check for Manual Trigger from GitHub Actions
         is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
-        
-        # 2. Check for Status Change
         status_changed = False
         if not df_old.empty:
-            prev_j_status = get_status(df_old.iloc[-1]["To_Johor"])
-            prev_w_status = get_status(df_old.iloc[-1]["To_Woodlands"])
-            if j_status != prev_j_status or w_status != prev_w_status:
+            if j_status != get_status(df_old.iloc[-1]["To_Johor"]) or w_status != get_status(df_old.iloc[-1]["To_Woodlands"]):
                 status_changed = True
-        else:
-            status_changed = True # Send if it's the first time creating the CSV
+        else: status_changed = True
             
-        # Final Decision: Send if the status changed OR you triggered it manually
         if status_changed or is_manual:
             send_telegram(msg)
