@@ -40,8 +40,8 @@ def download_traffic_image():
 
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    # SENSITIVITY: Set to 0.05 to catch blurry cars in the distant Woodlands jam
-    results = model("latest_traffic.jpg", conf=0.05, classes=[2, 3, 5, 7], imgsz=1280)
+    # SENSITIVITY: Set to 0.001 to find every tiny cluster in the distance
+    results = model("latest_traffic.jpg", conf=0.001, classes=[2, 3, 5, 7], imgsz=1280)
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
@@ -54,16 +54,17 @@ def analyze_traffic():
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
         
-        # Calculate the divider line relative to vertical position
+        # Calculate the divider line
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
-        # --- POWER CURVE MATH (SENSITIVE BUT HEAVY) ---
+        # --- THE POINT SYSTEM MATH ---
+        # norm_h: 0.0 at the bottom of the photo, 1.0 at the top (horizon)
         norm_h = max(0, min(1.0, 1.0 - (cy / h)))
         
-        # Base weight 0.7 + (Height^3 * 70)
-        # Foreground cars (low norm_h) will stay around 0.7 - 1.5
-        # Distant blobs (high norm_h) will spike to 25.0 - 45.0 each
-        weight = 0.7 + (norm_h ** 3) * 70.0 
+        # Weight formula: 1.0 + (Height^3 * 35)
+        # Foreground car: ~1.0 point
+        # Horizon blob: ~36.0 points
+        weight = 1.0 + (norm_h ** 3) * 35.0 
             
         if cx < line_x: 
             j_val += weight
@@ -92,7 +93,7 @@ if __name__ == "__main__":
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
-        # Update CSV
+        # Save to CSV
         new_row = pd.DataFrame([{"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "Weather": weather}])
         if os.path.exists("data.csv"):
             df = pd.concat([pd.read_csv("data.csv"), new_row], ignore_index=True)
@@ -100,7 +101,7 @@ if __name__ == "__main__":
             df = new_row
         df.to_csv("data.csv", index=False)
         
-        # Send Alert
+        # Final Message
         msg = (f"🚦 <b>Causeway Traffic Update</b>\n\n"
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
                f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
