@@ -39,11 +39,9 @@ def download_traffic_image():
     return False
 
 def analyze_traffic():
-    # Load model once
     model = YOLO("yolov8n.pt") 
-    
-    # FIX 1: Increased confidence from 0.01 to 0.25 to ignore false detections
-    results = model("latest_traffic.jpg", conf=0.25, classes=[2, 3, 5, 7], imgsz=1280)
+    # SENSITIVITY: Set to 0.05 to catch blurry cars in the distant Woodlands jam
+    results = model("latest_traffic.jpg", conf=0.05, classes=[2, 3, 5, 7], imgsz=1280)
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
@@ -56,17 +54,16 @@ def analyze_traffic():
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
         
-        # Calculate where the divider line is at this vertical position (cy)
+        # Calculate the divider line relative to vertical position
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
-        # --- NEW ACCURACY MATH ---
-        # Height ratio: 0.0 at bottom (close), 1.0 at top (horizon)
+        # --- POWER CURVE MATH (SENSITIVE BUT HEAVY) ---
         norm_h = max(0, min(1.0, 1.0 - (cy / h)))
         
-        # FIX 2: weight = 0.8 base + (height cubed * 25)
-        # Cubing (norm_h**3) keeps the weight VERY low for the foreground 
-        # but still allows it to spike for the far jam.
-        weight = 0.8 + (norm_h ** 3) * 25.0 
+        # Base weight 0.7 + (Height^3 * 70)
+        # Foreground cars (low norm_h) will stay around 0.7 - 1.5
+        # Distant blobs (high norm_h) will spike to 25.0 - 45.0 each
+        weight = 0.7 + (norm_h ** 3) * 70.0 
             
         if cx < line_x: 
             j_val += weight
@@ -95,19 +92,19 @@ if __name__ == "__main__":
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
-        # Save to CSV (This is the "Source of Truth" for the Web)
+        # Update CSV
         new_row = pd.DataFrame([{"Time": now, "To_Johor": johor, "To_Woodlands": woodlands, "Weather": weather}])
         if os.path.exists("data.csv"):
             df = pd.concat([pd.read_csv("data.csv"), new_row], ignore_index=True)
-        else: df = new_row
+        else: 
+            df = new_row
         df.to_csv("data.csv", index=False)
         
-        # EXACT MESSAGE FORMAT
+        # Send Alert
         msg = (f"🚦 <b>Causeway Traffic Update</b>\n\n"
                f"🇲🇾 To Johor: {johor} ({j_status})\n"
                f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
                f"🕒 {now} | {weather}\n"
                f"<a href='https://jamsniper.streamlit.app/'>View Live Dashboard</a>")
         
-        is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
         send_telegram(msg)
