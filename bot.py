@@ -53,17 +53,25 @@ def analyze_traffic():
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
-        # SMART WEIGHTING: Horizon/Jam Zone = 15.0x | Foreground = 1.5x
-        weight = 15.0 if cy < (h * 0.5) else 1.5
+        # --- NEW POWER CURVE MATH ---
+        # 1. Calculate height ratio (0.0 at bottom, 1.0 at top)
+        # We cap cy between 0 and h to avoid math errors
+        norm_h = max(0, min(1.0, 1.0 - (cy / h)))
+        
+        # 2. Apply the Curve: weight = base + (height^2 * multiplier)
+        # This makes distant cars (high norm_h) count for MUCH more
+        weight = 1.2 + (norm_h ** 2) * 45.0 
             
-        if cx < line_x: j_val += weight
-        else: w_val += weight
+        if cx < line_x: 
+            j_val += weight
+        else: 
+            w_val += weight
             
     return int(j_val), int(w_val)
 
 def get_status(count):
-    if count < 56: return "CLEAR"
-    elif count < 100: return "MODERATE"
+    if count < 61: return "CLEAR"
+    elif count < 161: return "MODERATE"
     else: return "JAM"
 
 def send_telegram(message):
