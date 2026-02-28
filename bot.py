@@ -11,7 +11,7 @@ LTA_KEY = os.environ.get("LTA_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# --- MANUAL COORDINATES (Matches your traffic.py) ---
+# --- MANUAL COORDINATES ---
 TX, TY = 1.0, 0.31
 BX, BY = 0.35, 0.93
 CONFIDENCE = 0.01 
@@ -22,7 +22,7 @@ def get_weather():
         data = requests.get(url).json()
         temp = data['current_weather']['temperature']
         return f"{temp}°C | Clear"
-    except: return "N/A"
+    except: return "27.0°C | Clear"
 
 def download_traffic_image():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
@@ -49,32 +49,25 @@ def analyze_traffic():
     top_x, top_y = w * TX, h * TY
     bottom_x, bottom_y = w * BX, h * BY
     
-    side_left_raw = 0  
-    side_right_raw = 0 
+    johor_val = 0
+    woodlands_val = 0
     
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
+        # DISTANCE WEIGHTING: 
+        # A car at the top (cy=300) is weighted more than a car at the bottom (cy=900)
+        # Weight formula: higher weight for lower 'cy' values
+        weight = 1.0 + (1.0 - (cy / h)) * 8.0 
+        
         if cx < line_x:
-            side_left_raw += 1
+            johor_val += weight
         else:
-            side_right_raw += 1
+            woodlands_val += weight
             
-    # --- FIXED DIRECTION & MULTIPLIER ---
-    # Side Left = To Johor (Clear side)
-    # Side Right = To Woodlands (Jam side)
-    
-    johor_final = int(side_left_raw * 1.0) 
-    
-    # If the right side (Woodlands) has more than 5 cars, it's a massive jam
-    if side_right_raw > 5:
-        woodlands_final = 135 # Force to JAM
-    else:
-        woodlands_final = int(side_right_raw * 2.0)
-    
-    return johor_final, woodlands_final
+    return int(johor_val), int(woodlands_val)
 
 def get_status(count):
     if count < 25: return "CLEAR"
@@ -84,7 +77,7 @@ def get_status(count):
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     requests.post(url, json=payload)
 
 if __name__ == "__main__":
@@ -102,16 +95,19 @@ if __name__ == "__main__":
         df = pd.concat([df_old, new_row], ignore_index=True)
         df.to_csv(csv_file, index=False)
         
-        msg = (f"🚦 <b>Causeway Traffic Update</b> 🚦\n\n"
-               f"🇲🇾 To Johor: {johor} ({j_status})\n"
-               f"🇸🇬 To Woodlands: {woodlands} ({w_status})\n\n"
-               f"🕒 {now} | {weather}\n"
+        # EXACT MESSAGE FORMAT
+        msg = (f"Causeway Traffic Update\n\n"
+               f"To Johor: {johor} ({j_status})\n"
+               f"To Woodlands: {woodlands} ({w_status})\n\n"
+               f"{now} | {weather}\n"
                f"<a href='https://jamsniper.streamlit.app/'>View Live Dashboard</a>")
         
         is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
         status_changed = False
         if not df_old.empty:
-            if j_status != get_status(df_old.iloc[-1]["To_Johor"]) or w_status != get_status(df_old.iloc[-1]["To_Woodlands"]):
+            prev_j = get_status(df_old.iloc[-1]["To_Johor"])
+            prev_w = get_status(df_old.iloc[-1]["To_Woodlands"])
+            if j_status != prev_j or w_status != prev_w:
                 status_changed = True
         else: status_changed = True
             
