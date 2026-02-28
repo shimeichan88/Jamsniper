@@ -78,9 +78,12 @@ def analyze_traffic():
     return int(j_raw * 3), int(w_raw * 1.5)
 
 def get_status(count):
-    if count <= 15: return "CLEAR"
-    elif count <= 35: return "MODERATE"
-    else: return "JAM"
+    if count < 25:      # 0 to 24 is Clear
+        return "CLEAR"
+    elif count < 50:    # 25 to 49 is Moderate
+        return "MODERATE"
+    else:               # 50 and above is Jam
+        return "JAM"
 
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
