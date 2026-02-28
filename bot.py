@@ -52,23 +52,25 @@ def download_traffic_image():
 
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    results = model("latest_traffic.jpg", conf=CONFIDENCE, iou=0.5, classes=[2, 3, 5, 7], imgsz=1280)
+    results = model("latest_traffic.jpg", conf=CONFIDENCE, classes=[2, 3, 5, 7], imgsz=1280)
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
-    top_x, bottom_x = int(w * SHIFT_TOP), int(w * SHIFT_BOTTOM)
     
-    # Draw green line for your web view
-    cv2.line(img, (top_x, 0), (bottom_x, h), (0, 255, 0), 5)
-    cv2.imwrite("latest_traffic.jpg", img)
+    # FIX: Use the new 4-variable names here 
+    top_x, top_y = int(w * TX), int(h * TY)
+    bottom_x, bottom_y = int(w * BX), int(h * BY)
     
     j_raw, w_raw = 0, 0
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
-        line_x = bottom_x + (top_x - bottom_x) * (cy / h)
-        if cx > line_x: j_raw += 1
-        else: w_raw += 1
+        
+        # This math checks if the car is on the Johor or Woodlands side
+        if top_y <= cy <= bottom_y:
+            line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
+            if cx > line_x: j_raw += 1
+            else: w_raw += 1
             
     return int(j_raw * 3), int(w_raw * 1.5)
 
