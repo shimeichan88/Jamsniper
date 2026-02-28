@@ -40,8 +40,10 @@ def download_traffic_image():
 
 def analyze_traffic():
     model = YOLO("yolov8n.pt") 
-    # SENSITIVITY: Set to 0.001 to find every tiny cluster in the distance
-    results = model("latest_traffic.jpg", conf=0.001, classes=[2, 3, 5, 7], imgsz=1280)
+    
+    # 1. RAISE CONFIDENCE: 0.15 means "Only count it if you are 15% sure it's a car"
+    # This will stop the "fake" 149 count on an empty road.
+    results = model("latest_traffic.jpg", conf=0.15, classes=[2, 3, 5, 7], imgsz=1280)
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
@@ -53,18 +55,14 @@ def analyze_traffic():
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
-        
-        # Calculate the divider line
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
-        # --- THE POINT SYSTEM MATH ---
-        # norm_h: 0.0 at the bottom of the photo, 1.0 at the top (horizon)
         norm_h = max(0, min(1.0, 1.0 - (cy / h)))
         
-        # Weight formula: 1.0 + (Height^3 * 35)
-        # Foreground car: ~1.0 point
-        # Horizon blob: ~36.0 points
-        weight = 1.0 + (norm_h ** 3) * 35.0 
+        # 2. ADJUSTED WEIGHT: 
+        # Base weight 1.0 + (Height^3 * 45)
+        # This makes distant clusters worth about 25-35 points each.
+        weight = 1.0 + (norm_h ** 3) * 45.0 
             
         if cx < line_x: 
             j_val += weight
