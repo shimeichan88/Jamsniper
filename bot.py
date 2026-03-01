@@ -6,6 +6,7 @@ import pytz
 from ultralytics import YOLO
 import cv2
 import random
+import numpy as np  # Added for the density heatmap polygons
 
 # --- CREDENTIALS ---
 LTA_KEY = os.environ.get("LTA_API_KEY")
@@ -42,52 +43,64 @@ def analyze_traffic():
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
-    top_x, top_y = w * TX, h * TY
-    bottom_x, bottom_y = w * BX, h * BY
+    top_x_f, top_y_f = w * TX, h * TY
+    bottom_x_f, bottom_y_f = w * BX, h * BY
     
-    # Standard counters
     j_val, w_val = 0, 0
     
-    # Density Heatmap counters (Total pixel area covered by cars)
-    j_density_area = 0.0
-    w_density_area = 0.0
-    
+    # --- YOLO BOUNDING BOX MATH ---
     for box in results[0].boxes:
         x1, y1, x2, y2 = box.xyxy[0]
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
         box_area = float((x2 - x1) * (y2 - y1))
         
-        line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
+        line_x = bottom_x_f + (top_x_f - bottom_x_f) * ((cy - bottom_y_f) / (top_y_f - bottom_y_f))
         
-        # --- THE 80% CONFIDENCE MATH ---
-        # Perspective factor: 0.0 at bottom, 1.0 at horizon
+        # Perspective factor and weight
         norm_h = max(0.01, min(1.0, 1.0 - (cy / h)))
-        
-        # Weighting: Small area (far away) gets higher weight.
         weight = 1.2 + (850 / (box_area + 25)) * (norm_h ** 1.5)
-        
-        # THE SAFETY CAP: Prevents massive errors.
         weight = min(weight, 35.0) 
         
-        # Sort into lanes and add to BOTH the box count and the density heatmap
-        if cx < line_x: 
-            j_val += weight
-            j_density_area += box_area  # Add to Johor density
-        else: 
-            w_val += weight
-            w_density_area += box_area  # Add to Woodlands density
-            
-    # --- DENSITY HEATMAP BACKUP LOGIC ---
-    # If the total pixel area of cars in a lane exceeds this threshold, 
-    # the lane is physically covered in metal (jam-packed).
-    DENSITY_JAM_THRESHOLD = 90000 
+        if cx < line_x: j_val += weight
+        else: w_val += weight
+
+    # --- 2. THE REAL DENSITY HEATMAP (OpenCV Edge Detection) ---
+    # Convert image to grayscale and find sharp edges (cars/metal)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
     
-    # If Density Heatmap says Johor is packed -> Randomize
-    if j_density_area > DENSITY_JAM_THRESHOLD:
+    # Create geometric lane boundaries based on your TX/TY coordinates
+    top_x, top_y = int(top_x_f), int(top_y_f)
+    bottom_x, bottom_y = int(bottom_x_f), int(bottom_y_f)
+    
+    # Left lane (Johor) polygon mask
+    j_poly = np.array([[(0, top_y), (top_x, top_y), (bottom_x, bottom_y), (0, bottom_y)]], dtype=np.int32)
+    j_mask = np.zeros_like(gray)
+    cv2.fillPoly(j_mask, j_poly, 255)
+    
+    # Right lane (Woodlands) polygon mask
+    w_poly = np.array([[(top_x, top_y), (w, top_y), (w, bottom_y), (bottom_x, bottom_y)]], dtype=np.int32)
+    w_mask = np.zeros_like(gray)
+    cv2.fillPoly(w_mask, w_poly, 255)
+    
+    # Calculate how much of each lane is covered in "edges"
+    j_edges = cv2.bitwise_and(edges, edges, mask=j_mask)
+    w_edges = cv2.bitwise_and(edges, edges, mask=w_mask)
+    
+    j_mask_area = max(1, np.count_nonzero(j_mask))
+    w_mask_area = max(1, np.count_nonzero(w_mask))
+    
+    j_edge_density = np.count_nonzero(j_edges) / j_mask_area
+    w_edge_density = np.count_nonzero(w_edges) / w_mask_area
+    
+    # --- 3. YOUR OVERRIDE LOGIC ---
+    # If more than 12% of the lane's surface area is sharp edges, it's jammed.
+    EDGE_JAM_THRESHOLD = 0.12 
+    
+    if j_edge_density > EDGE_JAM_THRESHOLD:
         j_val = random.randint(180, 250)
         
-    # If Density Heatmap says Woodlands is packed -> Randomize
-    if w_density_area > DENSITY_JAM_THRESHOLD:
+    if w_edge_density > EDGE_JAM_THRESHOLD:
         w_val = random.randint(180, 250)
         
     return int(j_val), int(w_val)
@@ -105,7 +118,7 @@ if __name__ == "__main__":
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
-        # --- DATA PERSISTENCE ---
+        # --- 4. DATA PERSISTENCE ---
         new_data = {"Time": now, "To_Johor": j_count, "To_Woodlands": w_count, "Weather": weather_info}
         new_df = pd.DataFrame([new_data])
         
@@ -124,7 +137,7 @@ if __name__ == "__main__":
             
         df.to_csv("data.csv", index=False)
 
-        # --- SMART TELEGRAM ALERT ---
+        # --- 5. SMART TELEGRAM ALERT ---
         j_status, w_status = get_status(j_count), get_status(w_count)
         current_status = f"{j_status}-{w_status}"
         
