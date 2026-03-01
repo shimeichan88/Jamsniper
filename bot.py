@@ -18,8 +18,23 @@ TX, TY = 1.0, 0.31
 BX, BY = 0.35, 0.93
 
 def get_weather():
-    # Hardcoded to "Clear" as requested
-    return "Clear"
+    weather_map = {
+        0: "Clear", 1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",
+        45: "Foggy", 48: "Foggy", 51: "Drizzle", 53: "Drizzle",
+        61: "Light Rain", 63: "Rain", 65: "Heavy Rain", 
+        80: "Showers", 81: "Heavy Showers", 95: "Thunderstorm"
+    }
+    try:
+        url = "https://api.open-meteo.com/v1/forecast?latitude=1.4481&longitude=103.7757&current_weather=true"
+        data = requests.get(url).json()
+        current = data['current_weather']
+        temp = current['temperature']
+        code = current['weathercode']
+        condition = weather_map.get(code, "Cloudy")
+        return f"{temp}°C | {condition}"
+    except:
+        return "Weather Unavailable"
+    
 
 def download_traffic_image():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
