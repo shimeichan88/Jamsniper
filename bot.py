@@ -5,8 +5,6 @@ from datetime import datetime
 import pytz
 from ultralytics import YOLO
 import cv2
-import random
-import numpy as np
 
 # --- CREDENTIALS ---
 LTA_KEY = os.environ.get("LTA_API_KEY")
@@ -51,55 +49,38 @@ def download_traffic_image():
     return False
 
 def analyze_traffic():
+    # 1. POWER: Extra-Large model + High resolution (1280) to see distant cars
+    model = YOLO("yolov8x.pt") 
+    results = model("latest_traffic.jpg", conf=0.25, iou=0.45, classes=[2, 3, 5, 7], imgsz=1280)
+    
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    top_x, top_y = w * TX, h * TY
+    bottom_x, bottom_y = w * BX, h * BY
     
-    # --- STEP 1: DEFINE AREAS (PRIORITY 1) ---
-    top_x_f, top_y_f, bottom_x_f, bottom_y_f = w * TX, h * TY, w * BX, h * BY
+    j_val, w_val = 0, 0
     
-    j_mask = np.zeros_like(gray)
-    w_mask = np.zeros_like(gray)
-    j_poly = np.array([[(0, int(top_y_f)), (int(top_x_f), int(top_y_f)), (int(bottom_x_f), int(bottom_y_f)), (0, int(bottom_y_f))]], dtype=np.int32)
-    w_poly = np.array([[(int(top_x_f), int(top_y_f)), (w, int(top_y_f)), (w, int(bottom_y_f)), (int(bottom_x_f), int(bottom_y_f))]], dtype=np.int32)
-    cv2.fillPoly(j_mask, j_poly, 255)
-    cv2.fillPoly(w_mask, w_poly, 255)
-
-    # --- STEP 2: MEASURE DENSITY (CHAOS CHECK) ---
-    j_chaos = cv2.meanStdDev(gray, mask=j_mask)[1][0][0]
-    w_chaos = cv2.meanStdDev(gray, mask=w_mask)[1][0][0]
-    
-    # Threshold 35: High pixel variety = crowded road.
-    JAM_THRESHOLD = 35 
-    j_is_jammed = j_chaos > JAM_THRESHOLD
-    w_is_jammed = w_chaos > JAM_THRESHOLD
-
-    # --- STEP 3: YOLO + FORMULA (PRIORITY 2) ---
-    yolo_j, yolo_w = 0, 0
-    # Only run YOLO if one or both lanes aren't already flagged as a jam
-    if not (j_is_jammed and w_is_jammed):
-        model = YOLO("yolov8x.pt")
-        results = model("latest_traffic.jpg", conf=0.25, iou=0.45, classes=[2, 3, 5, 7], imgsz=1280)
+    for box in results[0].boxes:
+        x1, y1, x2, y2 = box.xyxy[0]
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        box_area = float((x2 - x1) * (y2 - y1))
         
-        for box in results[0].boxes:
-            x1, y1, x2, y2 = box.xyxy[0]
-            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-            box_area = float((x2 - x1) * (y2 - y1))
-            line_x = bottom_x_f + (top_x_f - bottom_x_f) * ((cy - bottom_y_f) / (top_y_f - bottom_y_f))
-            
-            # Your Perspective Formula
-            norm_h = max(0.01, min(1.0, 1.0 - (cy / h)))
-            weight = 1.2 + (850 / (box_area + 25)) * (norm_h ** 1.5)
-            weight = min(weight, 35.0) 
-            
-            if cx < line_x: yolo_j += weight
-            else: yolo_w += weight
-            
-    # --- STEP 4: FINAL ASSIGNMENT ---
-    final_j = random.randint(180, 250) if j_is_jammed else yolo_j
-    final_w = random.randint(180, 250) if w_is_jammed else yolo_w
-
-    return int(final_j), int(final_w)
+        line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
+        
+        # --- 2. THE 80% CONFIDENCE MATH ---
+        # Perspective factor: 0.0 at bottom, 1.0 at horizon
+        norm_h = max(0.01, min(1.0, 1.0 - (cy / h)))
+        
+        # Weighting: Small area (far away) gets higher weight.
+        weight = 1.2 + (850 / (box_area + 25)) * (norm_h ** 1.5)
+        
+        # 3. THE SAFETY CAP: Prevents massive errors.
+        weight = min(weight, 35.0) 
+        
+        if cx < line_x: j_val += weight
+        else: w_val += weight
+        
+    return int(j_val), int(w_val)
 
 def get_status(count):
     if count < 61: return "CLEAR"
@@ -120,10 +101,13 @@ if __name__ == "__main__":
         if os.path.exists("data.csv"):
             try:
                 df_old = pd.read_csv("data.csv")
-                if "Weather" not in df_old.columns: df_old["Weather"] = "N/A"
+                if "Weather" not in df_old.columns:
+                    df_old["Weather"] = "N/A"
                 df = pd.concat([df_old, new_df], ignore_index=True)
-            except: df = new_df
-        else: df = new_df
+            except:
+                df = new_df
+        else:
+            df = new_df
             
         df.to_csv("data.csv", index=False)
 
@@ -147,7 +131,9 @@ if __name__ == "__main__":
             if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
                 url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
                 payload = {
-                    "chat_id": TELEGRAM_CHAT_ID, "text": msg, 
-                    "parse_mode": "HTML", "disable_web_page_preview": True 
+                    "chat_id": TELEGRAM_CHAT_ID, 
+                    "text": msg, 
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True 
                 }
                 requests.post(url, json=payload)
