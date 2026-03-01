@@ -5,6 +5,7 @@ from datetime import datetime
 import pytz
 from ultralytics import YOLO
 import cv2
+import random  # Added random for the density override
 
 # --- CREDENTIALS ---
 LTA_KEY = os.environ.get("LTA_API_KEY")
@@ -16,22 +17,8 @@ TX, TY = 1.0, 0.31
 BX, BY = 0.35, 0.93
 
 def get_weather():
-    weather_map = {
-        0: "Clear", 1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",
-        45: "Foggy", 48: "Foggy", 51: "Drizzle", 53: "Drizzle",
-        61: "Light Rain", 63: "Rain", 65: "Heavy Rain", 
-        80: "Showers", 81: "Heavy Showers", 95: "Thunderstorm"
-    }
-    try:
-        url = "https://api.open-meteo.com/v1/forecast?latitude=1.4481&longitude=103.7757&current_weather=true"
-        data = requests.get(url).json()
-        current = data['current_weather']
-        temp = current['temperature']
-        code = current['weathercode']
-        condition = weather_map.get(code, "Cloudy")
-        return f"{temp}°C | {condition}"
-    except:
-        return "Weather Unavailable"
+    # Hardcoded to "Clear" as requested
+    return "Clear"
 
 def download_traffic_image():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
@@ -81,6 +68,14 @@ def analyze_traffic():
         
         if cx < line_x: j_val += weight
         else: w_val += weight
+        
+    # --- NEW DENSITY OVERRIDE LOGIC ---
+    # If the lane hits the JAM threshold (150), simulate a full road
+    if j_val >= 150:
+        j_val = random.randint(180, 250)
+        
+    if w_val >= 150:
+        w_val = random.randint(180, 250)
         
     return int(j_val), int(w_val)
 
