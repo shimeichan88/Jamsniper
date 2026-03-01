@@ -39,6 +39,10 @@ try:
             val_w = int(latest["To_Woodlands"])
 
             st.write(f"**Last Update:** {latest['Time']}")
+            
+            # --- NEW: DISPLAY WEATHER ---
+            weather_val = latest.get("Weather", "Data Unavailable")
+            st.write(f"**Current Weather:** {weather_val}")
 
             col1, col2 = st.columns(2)
             

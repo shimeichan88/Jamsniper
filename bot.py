@@ -6,7 +6,7 @@ import pytz
 from ultralytics import YOLO
 import cv2
 import random
-import numpy as np  # Added for the density heatmap polygons
+import numpy as np
 
 # --- CREDENTIALS ---
 LTA_KEY = os.environ.get("LTA_API_KEY")
@@ -34,7 +34,6 @@ def get_weather():
         return f"{temp}°C | {condition}"
     except:
         return "Weather Unavailable"
-    
 
 def download_traffic_image():
     headers = {'AccountKey': LTA_KEY, 'accept': 'application/json'}
@@ -121,8 +120,8 @@ def analyze_traffic():
     return int(j_val), int(w_val)
 
 def get_status(count):
-    if count < 55: return "CLEAR"
-    elif count < 150: return "MODERATE"
+    if count < 61: return "CLEAR"
+    elif count < 161: return "MODERATE"
     else: return "JAM"
 
 if __name__ == "__main__":
@@ -168,9 +167,15 @@ if __name__ == "__main__":
             msg = (f"🚦 <b>Causeway Status Change</b>\n\n"
                    f"🇲🇾 To Johor: {j_count} ({j_status})\n"
                    f"🇸🇬 To Woodlands: {w_count} ({w_status})\n\n"
-                   f"🕒 {now} | {weather_info}\n"
-                   f"<a href='https://jamsniper.streamlit.app/'>View Dashboard</a>")
+                   f"🕒 {now} | {weather_info}\n\n"
+                   f"🔗 https://jamsniper.streamlit.app/")
             
             if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
                 url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-                requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"})
+                payload = {
+                    "chat_id": TELEGRAM_CHAT_ID, 
+                    "text": msg, 
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True 
+                }
+                requests.post(url, json=payload)
