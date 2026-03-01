@@ -51,21 +51,30 @@ def download_traffic_image():
     return False
 
 def analyze_traffic():
-    model = YOLO("yolov8n.pt") 
-    results = model("latest_traffic.jpg", conf=0.01, classes=[2, 3, 5, 7], imgsz=1280)
+    # 1. THE UPGRADE: Switch to the Extra-Large model for massive accuracy boost
+    model = YOLO("yolov8x.pt") 
+    
+    # 2. THE FILTER: conf=0.25 stops empty-road ghosts. iou=0.45 stops the 1857 overlapping glitch.
+    results = model("latest_traffic.jpg", conf=0.25, iou=0.45, classes=[2, 3, 5, 7], imgsz=1280)
+    
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
     top_x, top_y = w * TX, h * TY
     bottom_x, bottom_y = w * BX, h * BY
     j_val, w_val = 0, 0
+    
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         norm_h = max(0, min(1.0, 1.0 - (cy / h)))
+        
+        # Your custom multiplier math remains completely untouched
         weight = 1.2 + (norm_h ** 2) * 45.0 
+        
         if cx < line_x: j_val += weight
         else: w_val += weight
+        
     return int(j_val), int(w_val)
 
 def get_status(count):
