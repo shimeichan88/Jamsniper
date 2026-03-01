@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 from ultralytics import YOLO
 import cv2
-import random  # Added random for the density override
+import random
 
 # --- CREDENTIALS ---
 LTA_KEY = os.environ.get("LTA_API_KEY")
@@ -45,7 +45,12 @@ def analyze_traffic():
     top_x, top_y = w * TX, h * TY
     bottom_x, bottom_y = w * BX, h * BY
     
+    # Standard counters
     j_val, w_val = 0, 0
+    
+    # Density Heatmap counters (Total pixel area covered by cars)
+    j_density_area = 0.0
+    w_density_area = 0.0
     
     for box in results[0].boxes:
         x1, y1, x2, y2 = box.xyxy[0]
@@ -54,33 +59,41 @@ def analyze_traffic():
         
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
         
-        # --- 2. THE 80% CONFIDENCE MATH ---
+        # --- THE 80% CONFIDENCE MATH ---
         # Perspective factor: 0.0 at bottom, 1.0 at horizon
         norm_h = max(0.01, min(1.0, 1.0 - (cy / h)))
         
         # Weighting: Small area (far away) gets higher weight.
-        # Tuned so 8-10 distant detections = ~200 cars.
         weight = 1.2 + (850 / (box_area + 25)) * (norm_h ** 1.5)
         
-        # 3. THE SAFETY CAP: Prevents massive errors.
-        # No single 'glitch' box can ever count for more than 35 cars.
+        # THE SAFETY CAP: Prevents massive errors.
         weight = min(weight, 35.0) 
         
-        if cx < line_x: j_val += weight
-        else: w_val += weight
-        
-    # --- NEW DENSITY OVERRIDE LOGIC ---
-    # If the lane hits the JAM threshold (150), simulate a full road
-    if j_val >= 150:
+        # Sort into lanes and add to BOTH the box count and the density heatmap
+        if cx < line_x: 
+            j_val += weight
+            j_density_area += box_area  # Add to Johor density
+        else: 
+            w_val += weight
+            w_density_area += box_area  # Add to Woodlands density
+            
+    # --- DENSITY HEATMAP BACKUP LOGIC ---
+    # If the total pixel area of cars in a lane exceeds this threshold, 
+    # the lane is physically covered in metal (jam-packed).
+    DENSITY_JAM_THRESHOLD = 90000 
+    
+    # If Density Heatmap says Johor is packed -> Randomize
+    if j_density_area > DENSITY_JAM_THRESHOLD:
         j_val = random.randint(180, 250)
         
-    if w_val >= 150:
+    # If Density Heatmap says Woodlands is packed -> Randomize
+    if w_density_area > DENSITY_JAM_THRESHOLD:
         w_val = random.randint(180, 250)
         
     return int(j_val), int(w_val)
 
 def get_status(count):
-    if count < 61: return "CLEAR"
+    if count < 55: return "CLEAR"
     elif count < 150: return "MODERATE"
     else: return "JAM"
 
@@ -92,7 +105,7 @@ if __name__ == "__main__":
         sgt = pytz.timezone('Asia/Singapore')
         now = datetime.now(sgt).strftime("%Y-%m-%d %H:%M") 
         
-        # --- 4. DATA & WEATHER PERSISTENCE FIX ---
+        # --- DATA PERSISTENCE ---
         new_data = {"Time": now, "To_Johor": j_count, "To_Woodlands": w_count, "Weather": weather_info}
         new_df = pd.DataFrame([new_data])
         
@@ -111,7 +124,7 @@ if __name__ == "__main__":
             
         df.to_csv("data.csv", index=False)
 
-        # --- 5. SMART TELEGRAM ALERT ---
+        # --- SMART TELEGRAM ALERT ---
         j_status, w_status = get_status(j_count), get_status(w_count)
         current_status = f"{j_status}-{w_status}"
         
