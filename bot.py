@@ -16,7 +16,6 @@ TX, TY = 1.0, 0.31
 BX, BY = 0.35, 0.93
 
 def get_weather():
-    # NO HARDCODING: Mapping API codes to actual words
     weather_map = {
         0: "Clear", 1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",
         45: "Foggy", 48: "Foggy", 51: "Drizzle", 53: "Drizzle",
@@ -29,7 +28,6 @@ def get_weather():
         current = data['current_weather']
         temp = current['temperature']
         code = current['weathercode']
-        # Dynamically select the condition based on the API code
         condition = weather_map.get(code, "Cloudy")
         return f"{temp}°C | {condition}"
     except:
@@ -51,26 +49,42 @@ def download_traffic_image():
     return False
 
 def analyze_traffic():
-    # 1. THE UPGRADE: Switch to the Extra-Large model for massive accuracy boost
+    # 1. UPGRADED MODEL: yolov8x is significantly better at small objects/low light
     model = YOLO("yolov8x.pt") 
     
-    # 2. THE FILTER: conf=0.25 stops empty-road ghosts. iou=0.45 stops the 1857 overlapping glitch.
-    results = model("latest_traffic.jpg", conf=0.25, iou=0.45, classes=[2, 3, 5, 7], imgsz=1280)
+    # 2. STRICT FILTERS: 
+    # conf=0.30 kills "ghost" noise on empty roads.
+    # iou=0.45 prevents the "1857" error by merging overlapping boxes.
+    results = model("latest_traffic.jpg", conf=0.30, iou=0.45, classes=[2, 3, 5, 7], imgsz=1280)
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
     top_x, top_y = w * TX, h * TY
     bottom_x, bottom_y = w * BX, h * BY
+    
+    # 3. TIME-OF-DAY LOGIC (Singapore Time)
+    sgt = pytz.timezone('Asia/Singapore')
+    current_hour = datetime.now(sgt).hour
+    # Increase multiplier between 7 PM and 7 AM to account for invisible dark cars
+    is_night = (current_hour >= 19 or current_hour <= 7)
+    night_boost = 5.0 if is_night else 0.0
+    
     j_val, w_val = 0, 0
     
     for box in results[0].boxes:
         cx = (box.xyxy[0][0] + box.xyxy[0][2]) / 2
         cy = (box.xyxy[0][1] + box.xyxy[0][3]) / 2
+        
+        # Determine which side of the divider the car is on
         line_x = bottom_x + (top_x - bottom_x) * ((cy - bottom_y) / (top_y - bottom_y))
+        
+        # 4. STABLE PERSPECTIVE WEIGHTING
+        # norm_h is 0.0 at the bottom (close) and 1.0 at the top (far edge)
         norm_h = max(0, min(1.0, 1.0 - (cy / h)))
         
-        # Your custom multiplier math remains completely untouched
-        weight = 1.2 + (norm_h ** 2) * 45.0 
+        # This curve ensures 1 car at the far edge = ~13 in Day, ~18 at Night.
+        # It prevents a single car from ever triggering a "200+" count.
+        weight = 1.2 + (norm_h ** 2) * (12.0 + night_boost)
         
         if cx < line_x: j_val += weight
         else: w_val += weight
@@ -78,8 +92,9 @@ def analyze_traffic():
     return int(j_val), int(w_val)
 
 def get_status(count):
-    if count < 61: return "CLEAR"
-    elif count < 161: return "MODERATE"
+    # Adjusting thresholds slightly to match the new stable weights
+    if count < 40: return "CLEAR"
+    elif count < 120: return "MODERATE"
     else: return "JAM"
 
 def send_telegram(message):
