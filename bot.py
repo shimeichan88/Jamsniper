@@ -51,7 +51,7 @@ def download_traffic_image():
 def analyze_traffic():
     # 1. POWER: Extra-Large model + High resolution (1280) to see distant cars
     model = YOLO("yolov8x.pt") 
-    results = model("latest_traffic.jpg", conf=0.25, iou=0.45, classes=[2, 3, 5, 7], imgsz=1280)
+    results = model("latest_traffic.jpg", conf=0.15, iou=0.75, classes=[2, 3, 5, 7], imgsz=1280)
     
     img = cv2.imread("latest_traffic.jpg")
     h, w, _ = img.shape
